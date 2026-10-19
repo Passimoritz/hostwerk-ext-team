@@ -1,0 +1,41 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Passimoritz/hostwerk-public/main/sdk/manifest.schema.json",
+  "id": "team",
+  "name": {
+    "de": "Team & Rollen",
+    "en": "Team & roles"
+  },
+  "description": {
+    "de": "Freunde und Kollegen mit eigener Anmeldung im Fernzugriff – Mitglieder sehen und steuern nur, was du freigibst (Dienste und Bereiche wie Konsole, Spieler, Sicherungen). Dazu gemeinsame Team-Setups aus einem geteilten Ordner.",
+    "en": "Friends and colleagues with their own sign-in for remote access – members only see and control what you share (services and areas like console, players, backups). Plus shared team setups from a shared folder."
+  },
+  "version": "1.0.0",
+  "author": "Hostwerk",
+  "homepage": "https://github.com/Passimoritz/hostwerk-ext-team",
+  "license": "MIT",
+  "icon": "icon.svg",
+  "banner": "banner.svg",
+  "color": "#db2777",
+  "category": "security",
+  "hostwerk": ">=2.9.0",
+  "permissions": [
+    "native"
+  ],
+  "page": {
+    "title": {
+      "de": "Team & Rollen",
+      "en": "Team & roles"
+    },
+    "description": {
+      "de": "Benutzer mit Rollen und Team-Setups.",
+      "en": "Users with roles and team setups."
+    },
+    "icon": "users"
+  },
+  "backend": "server/index.js",
+  "ui": "ui/index.js",
+  "screenshots": [
+    "docs/screenshot.png",
+    "docs/screenshot.de.png"
+  ]
+}

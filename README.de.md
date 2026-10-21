@@ -10,6 +10,7 @@ Freunde und Kollegen mit eigener Anmeldung für den Fernzugriff – Mitglieder s
 
 ## Was sie kann
 
+- **Wo:** Livebetrieb → Schützen → Benutzer – seit 1.3.1 ohne eigenen Seitenleisten-Eintrag; die ganze Seite bleibt unter Erweiterungen → Öffnen
 - Mitglieder mit eigener Anmeldung (Fernzugriff)
 - Benutzer-Dialog in vier Schritten (Person, Rolle, Zugriff, Extras) mit Zusammenfassung vor dem Speichern – „Paul darf: Firefight Testserver – starten und stoppen, Konsole … bis 30. Okt.“
 - Einzelne Dienste und **Bereiche je Dienst** freigeben (Matrix: Starten/Stoppen, Konsole, Spieler, Sicherungen, Dateien, Protokolle) – mit Vorlagen wie „Freund“ oder „Helfer“

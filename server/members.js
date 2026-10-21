@@ -95,6 +95,8 @@ const ADMIN_ONLY = [
   'GET /mc/servers/:id/datapacks-market', 'POST /mc/servers/:id/datapacks-market', 'POST /mc/servers/:id/datapacks/upload', 'PUT /mc/servers/:id/datapacks/:name', 'DELETE /mc/servers/:id/datapacks/:name',
   'POST /mc/servers/:id/worlds/import', 'POST /mc/servers/:id/worlds/upload', 'POST /mc/servers/:id/copy', 'POST /mc/servers/:id/pregen', 'POST /mc/servers/:id/pregen/:action', 'POST /mc/servers/:id/pregen/install',
   'POST /web/:id/cache/reset',
+  // Hostwerk 3.0: .htaccess und Vorlagen-Dateien je Seite
+  'GET /web/:id/sites/:vid/htaccess', 'PUT /web/:id/sites/:vid/htaccess', 'POST /web/:id/sites/:vid/files',
   'GET /dbs/:id/major', 'POST /dbs/:id/major', 'POST /dbs/:id/major/rollback', 'DELETE /dbs/:id/major/previous',
   'GET /dbs/:id/backups/:file/tables', 'POST /dbs/:id/backups/restore-table', 'POST /dbs/:id/backups/upload',
 ];

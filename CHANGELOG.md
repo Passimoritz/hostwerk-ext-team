@@ -1,3 +1,7 @@
+## 1.3.1
+
+- Lives where it belongs: Go live → Protect → Users – no own sidebar entry any more (Hostwerk 3.0+); the full page stays under Extensions → Open and can be pinned in the sidebar settings. / Steckt jetzt dort, wo sie hingehört: Livebetrieb → Schützen → Benutzer – kein eigener Seitenleisten-Eintrag mehr (Hostwerk 3.0+); die ganze Seite bleibt unter Erweiterungen → Öffnen und lässt sich in den Seitenleisten-Einstellungen anheften.
+
 ## 1.3.0
 
 - New user dialog in four steps – person, role, access, extras – with a jump bar and a plain-language summary before saving (“Paul may – until 30 Oct: Firefight test server: start and stop, console”). / Neuer Benutzer-Dialog in vier Schritten mit Sprungleiste und Zusammenfassung vor dem Speichern.

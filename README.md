@@ -10,6 +10,7 @@ Friends and colleagues with their own sign-in for remote access – members only
 
 ## What it does
 
+- **Where:** Go live → Protect → Users – no own sidebar entry since 1.3.1; the full page stays under Extensions → Open
 - Members with their own sign-in (remote access)
 - A user dialog in four steps (person, role, access, extras) with a summary before saving – “Paul may: Firefight test server – start and stop, console … until 30 Oct”
 - Share single services and **areas per service** (matrix: start/stop, console, players, backups, files, logs) – with templates like “Friend” or “Helper”

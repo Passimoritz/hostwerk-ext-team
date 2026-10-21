@@ -6,10 +6,10 @@
     "en": "Team & roles"
   },
   "description": {
-    "de": "Freunde und Kollegen mit eigener Anmeldung im Fernzugriff – Mitglieder sehen und steuern nur, was du freigibst (Dienste und Bereiche wie Konsole, Spieler, Sicherungen). Dazu gemeinsame Team-Setups aus einem geteilten Ordner.",
-    "en": "Friends and colleagues with their own sign-in for remote access – members only see and control what you share (services and areas like console, players, backups). Plus shared team setups from a shared folder."
+    "de": "Freunde und Kollegen mit eigener Anmeldung im Fernzugriff – Mitglieder sehen und steuern nur, was du freigibst (Dienste und Bereiche wie Konsole, Spieler, Sicherungen), auf Wunsch befristet. Einladung per Link statt Passwort, Protokoll wer was getan hat, dazu gemeinsame Team-Setups aus einem geteilten Ordner.",
+    "en": "Friends and colleagues with their own sign-in for remote access – members only see and control what you share (services and areas like console, players, backups), for a limited time if you like. Invite by link instead of a password, a log of who did what, plus shared team setups from a shared folder."
   },
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Hostwerk",
   "homepage": "https://github.com/Passimoritz/hostwerk-ext-team",
   "license": "MIT",
@@ -30,12 +30,20 @@
       "de": "Benutzer mit Rollen und Team-Setups.",
       "en": "Users with roles and team setups."
     },
-    "icon": "users"
+    "icon": "users",
+    "nav": {
+      "group": "system"
+    }
   },
   "backend": "server/index.js",
   "ui": "ui/index.js",
   "screenshots": [
     "docs/screenshot.png",
     "docs/screenshot.de.png"
-  ]
+  ],
+  "allowExtensions": {
+    "*": [
+      "tabs"
+    ]
+  }
 }

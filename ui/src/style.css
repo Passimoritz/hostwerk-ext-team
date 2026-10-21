@@ -1,0 +1,2 @@
+/* Team & roles */
+.team-link { word-break: break-all; font-size: var(--fs-xs); background: var(--surface-2); padding: var(--sp-2); border-radius: var(--r-sm); }

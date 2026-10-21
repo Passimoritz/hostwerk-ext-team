@@ -13,6 +13,10 @@ Friends and colleagues with their own sign-in for remote access – members only
 - Members with their own sign-in (remote access)
 - Share single services and areas: console, players, backups …
 - Members only see their own part of the overview
+- **Invite by link** instead of a password: the person chooses their own password; the link works once and expires after 1 hour to 7 days
+- **Rights for a limited time** for helpers – after the end date neither sign-in nor access works
+- **Activity:** what members changed (from Hostwerk's change log) and what they tried without permission
+- The rights rules are an anchored route table; a test reads Hostwerk's routes and fails as soon as a new core route has no decision
 - Team setups from a shared folder
 - Sign-in and passkeys stay in Hostwerk itself
 
@@ -29,7 +33,7 @@ Native extensions run as part of Hostwerk (own server and interface part). That 
 ## Develop
 
 ```bash
-node --test tests/*.test.js          # tests
+node --test tests/*.test.js          # tests (routes.test.js reads the routes from ../hostwerk or HOSTWERK_DIR)
 node build-native.js .               # build the interface (sdk/build-native.js from hostwerk-public)
 node check.js . --strict             # same check as the catalogue (sdk/check.js)
 ```

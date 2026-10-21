@@ -7,9 +7,20 @@
  *   Rights per member: services = service ids (mc:<id>, game:<id>, web:<id>, dbs:<id>, apps:<id>), areas
  *   (console, players, backups, files, logs, start-stop)
  * Enforced in the API (Hostwerk asks allowed(req, session) before every request); the local app is always admin.
+ * Rights can end on a date ("until"); members can be invited with a link that expires instead of passing on a password.
+ * Activity: changes from Hostwerk's change log by members plus refused attempts (kept here, the last 200).
  * Data stays where it always was: settings.users (role values "admin" / "mitglied" as before).
  */
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+
+const INVITE_HOURS = [1, 24, 72, 168];
+const DENIED_KEEP = 200;
+const sha = (x) => crypto.createHash('sha256').update(String(x)).digest('hex');
+const esc = (x) => String(x == null ? '' : x).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+/** Rights with an end date: expired = the member can no longer sign in or do anything. */
+const expired = (u, now = Date.now()) => !!(u && u.until && Number(u.until) <= now);
 
 const ROLE_MEMBER = 'mitglied'; // stored value (kept for existing data)
 const AREAS = { 'start-stop': 'Start, stop, restart', console: 'Console and commands', players: 'Manage players (whitelist, ban, op)', backups: 'Create/restore backups', files: 'Files of the service', logs: 'Read logs' };
@@ -32,7 +43,7 @@ const MEMBER_ROUTES = [
   ['POST', '/mc/servers/:id/command', 'mc', 'console'],
   ['GET', '/mc/servers/:id/logs', 'mc', 'logs'],
   ['*', '/mc/servers/:id/players', 'mc', 'players'], ['*', '/mc/servers/:id/players/*', 'mc', 'players'], ['*', '/mc/servers/:id/whitelist', 'mc', 'players'], ['*', '/mc/servers/:id/ops', 'mc', 'players'], ['*', '/mc/servers/:id/ban', 'mc', 'players'], ['*', '/mc/servers/:id/kick', 'mc', 'players'],
-  ['GET', '/mc/servers/:id/backups', 'mc', 'backups'], ['POST', '/mc/servers/:id/backups', 'mc', 'backups'], ['POST', '/mc/servers/:id/backups/restore', 'mc', 'backups'],
+  ['GET', '/mc/servers/:id/backups', 'mc', 'backups'], ['GET', '/mc/servers/:id/nightly-backup', 'mc', 'backups'], ['POST', '/mc/servers/:id/backups', 'mc', 'backups'], ['POST', '/mc/servers/:id/backups/restore', 'mc', 'backups'],
   ['GET', '/mc/servers/:id/backups/:file/download', 'mc', 'backups'], ['DELETE', '/mc/servers/:id/backups/:file', 'mc', 'backups'], ['GET', '/mc/servers/:id/worlds/:name/download', 'mc', 'backups'],
   ['*', '/mc/servers/:id/files', 'mc', 'files'], ['*', '/mc/servers/:id/files/*', 'mc', 'files'],
   // Spiele-Server (Erweiterung „Spiele-Server“): /games/:id/:command startet, stoppt, startet neu …
@@ -60,7 +71,7 @@ const ADMIN_ONLY = [
   'GET /mc/servers/:id/network', 'POST /mc/servers/:id/network', 'POST /mc/servers/:id/network/lobby', 'DELETE /mc/servers/:id/plugins/:file', 'DELETE /mc/servers/:id/plugins/source', 'PUT /mc/servers/:id/plugins/source',
   'POST /mc/servers/:id/plugins/source/open', 'POST /mc/servers/:id/plugins/source/resume', 'POST /mc/servers/:id/plugins/sources/check', 'POST /mc/servers/:id/plugins/sources/rescan', 'POST /mc/servers/:id/plugins/sources/update',
   'POST /mc/servers/:id/plugins/toggle', 'POST /mc/servers/:id/plugins/update', 'POST /mc/servers/:id/plugins/upload', 'GET /mc/servers/:id/safe-upgrade', 'POST /mc/servers/:id/safe-upgrade', 'GET /mc/servers/:id/safe-upgrade/history',
-  'POST /mc/servers/:id/safe-upgrade/check', 'POST /mc/servers/:id/updates/check', 'POST /mc/servers/:id/worlds/:name/reset',
+  'POST /mc/servers/:id/safe-upgrade/check', 'PUT /mc/servers/:id/nightly-backup', 'POST /mc/servers/:id/updates/check', 'POST /mc/servers/:id/worlds/:name/reset',
   'POST /games/:id/:command', 'DELETE /games/:id', 'PUT /games/:id', 'GET /games/:id/config', 'PUT /games/:id/config', 'PUT /games/:id/limits', 'PUT /games/:id/quick', 'GET /games/:id/textfile', 'PUT /games/:id/textfile',
   ...['web', 'dbs', 'apps'].flatMap((k) => [`DELETE /${k}/:id`, `PUT /${k}/:id`]),
   'POST /apps/:id/install-deps', 'POST /dbs/:id/password', 'POST /dbs/:id/upgrade', 'GET /dbs/:id/backups', 'POST /dbs/:id/backups', 'POST /dbs/:id/backups/restore', 'GET /dbs/:id/backups/:file/download', 'DELETE /dbs/:id/backups/:file', 'PUT /dbs/:id/backups/config',
@@ -122,9 +133,24 @@ function memberAllows(u, method, p) {
 }
 
 class Members {
-  constructor(host) { this.host = host; this.ctx = host.ctx; this.t = host.t; }
+  constructor(host) {
+    this.host = host; this.ctx = host.ctx; this.t = host.t;
+    this.dir = this.ctx.paths && this.ctx.paths.data ? path.join(this.ctx.paths.data, 'team') : null;
+    this.denied = this.readDenied();
+  }
+  readDenied() { try { return JSON.parse(fs.readFileSync(path.join(this.dir, 'denied.json'), 'utf8')); } catch { return []; } }
+  /** Refused attempt of a member – noted (the same request at most once a minute), so the owner sees who tried what. */
+  noteDenied(u, req) {
+    const now = Date.now();
+    const last = this.denied[0];
+    if (last && last.user === u.name && last.method === req.method && last.path === req.path && now - last.t < 60000) return;
+    this.denied.unshift({ t: now, user: u.name, method: req.method, path: String(req.path).slice(0, 200), reason: expired(u, now) ? 'expired' : 'denied' });
+    this.denied = this.denied.slice(0, DENIED_KEEP);
+    if (!this.dir) return;
+    try { fs.mkdirSync(this.dir, { recursive: true }); fs.writeFileSync(path.join(this.dir, 'denied.json.tmp'), JSON.stringify(this.denied)); fs.renameSync(path.join(this.dir, 'denied.json.tmp'), path.join(this.dir, 'denied.json')); } catch { /* nur Protokoll */ }
+  }
   get list() { const s = this.ctx.settings.get(); if (!s.users) s.users = []; return s.users; }
-  pub(u) { const { passHash, ...rest } = u; return { ...rest, hasPassword: !!passHash }; }
+  pub(u) { const { passHash, invite, ...rest } = u; return { ...rest, hasPassword: !!passHash, expired: expired(u), invite: invite && invite.until > Date.now() ? { until: invite.until } : null }; }
   get(id) { const u = this.list.find((x) => x.id === id); if (!u) throw this.host.error(404, 'User not found'); return u; }
   byName(name) { const n = String(name || '').trim().toLowerCase(); return this.list.find((u) => u.name.toLowerCase() === n && u.enabled !== false) || null; }
   save(b, id = null) {
@@ -133,24 +159,73 @@ class Members {
     if (!/^[\w.@ -]{2,40}$/.test(name)) throw new Error(t('Name: 2–40 characters (letters, digits, dot, @, -, space).'));
     if (name.toLowerCase() === String(this.ctx.remote.cfg.user || 'admin').toLowerCase() && !id) throw new Error(t('This name is the main remote access account.'));
     if (this.list.some((u) => u.name.toLowerCase() === name.toLowerCase() && u.id !== id)) throw new Error(t('Name already taken.'));
+    // Befristete Rechte: bis zu diesem Zeitpunkt (Millisekunden oder Datum), leer = unbefristet – vor dem Anlegen prüfen
+    let until;
+    if (b.until !== undefined) {
+      until = b.until === null || b.until === '' ? null : typeof b.until === 'number' ? b.until : Date.parse(String(b.until));
+      if (until !== null && !(Number.isFinite(until) && until > Date.now())) throw new Error(t('The end date must be in the future.'));
+    }
     let u = id ? this.get(id) : null;
     if (!u) { u = { id: crypto.randomBytes(4).toString('hex'), created: Date.now() }; this.list.push(u); }
     Object.assign(u, { name, role: b.role === 'admin' ? 'admin' : ROLE_MEMBER, enabled: b.enabled !== false, services: Array.isArray(b.services) ? b.services.filter((x) => /^(mc|game|web|dbs|apps):[\w-]+$/.test(x)).slice(0, 100) : (u.services || []), areas: Array.isArray(b.areas) ? b.areas.filter((x) => AREAS[x]) : (u.areas || ['start-stop', 'console', 'players']), note: String(b.note || '').slice(0, 200) });
+    if (until !== undefined) u.until = until;
     if (typeof b.password === 'string' && b.password) { if (b.password.length < 8) throw new Error(t('Password: at least 8 characters.')); u.passHash = hashPw(b.password); }
     this.ctx.settings.save();
     return this.pub(u);
   }
   remove(id) { const s = this.ctx.settings.get(); s.users = this.list.filter((u) => u.id !== id); this.ctx.settings.save(); if (this.ctx.remote && this.ctx.remote.sessions) for (const [k, v] of this.ctx.remote.sessions) if (v.userId === id) this.ctx.remote.sessions.delete(k); }
   /** Sign-in of a member (called by remote access). */
-  login(name, password) { const u = this.byName(name); if (!u || !u.passHash || !checkPw(password, u.passHash)) return null; u.lastLogin = Date.now(); this.ctx.settings.save(); return u; }
+  login(name, password) { const u = this.byName(name); if (!u || expired(u) || !u.passHash || !checkPw(password, u.passHash)) return null; u.lastLogin = Date.now(); this.ctx.settings.save(); return u; }
+
+  /**
+   * Invitation link instead of passing on a password: the member opens it, chooses a password, done. Only the hash of the
+   * token is stored; it works once and expires after hours. Address: remote access with own domain, else its LAN address.
+   */
+  invite(id, hours = 24) {
+    const u = this.get(id);
+    const h = INVITE_HOURS.includes(Number(hours)) ? Number(hours) : 24;
+    const token = crypto.randomBytes(24).toString('base64url');
+    u.invite = { hash: sha(token), until: Date.now() + h * 3600000 };
+    this.ctx.settings.save();
+    const r = this.ctx.remote && this.ctx.remote.status ? this.ctx.remote.status() : {};
+    const base = r.domain ? `https://${r.domain}${r.port && r.port !== 443 ? `:${r.port}` : ''}/` : (r.urls && r.urls[0]) || '/';
+    return { link: `${base.replace(/\/$/, '')}/api/team/invite/${token}`, until: u.invite.until, remoteEnabled: !!r.enabled };
+  }
+  /** The user an invitation token belongs to (valid and not used yet), else null. */
+  byInvite(token) {
+    const h = sha(token); const now = Date.now();
+    return this.list.find((u) => u.invite && u.invite.until > now && u.invite.hash.length === h.length && crypto.timingSafeEqual(Buffer.from(u.invite.hash), Buffer.from(h))) || null;
+  }
+  acceptInvite(token, password, repeat) {
+    const { t } = this;
+    const u = this.byInvite(token);
+    if (!u) throw Object.assign(new Error(t('This invitation is no longer valid – ask for a new one.')), { status: 404 });
+    if (String(password || '').length < 8) throw new Error(t('Password: at least 8 characters.'));
+    if (password !== repeat) throw new Error(t('The two passwords are not the same.'));
+    u.passHash = hashPw(password); delete u.invite; u.enabled = true;
+    this.ctx.settings.save();
+    return u;
+  }
+
+  /** Who did what: changes by members from Hostwerk's change log plus refused attempts, newest first. */
+  activity(limit = 300) {
+    const names = new Set(this.list.map((u) => u.name.toLowerCase()));
+    let changes = [];
+    try { changes = (this.ctx.audit ? this.ctx.audit.list({ limit: 2000 }).items : []).filter((e) => e.user && names.has(String(e.user).toLowerCase())).map((e) => ({ t: e.t, user: e.user, kind: 'change', text: [e.kind, e.target, e.action].filter(Boolean).join(' · '), device: e.device || null })); } catch { /* ohne Änderungs-Protokoll */ }
+    const refused = this.denied.map((d) => ({ t: d.t, user: d.user, kind: d.reason, text: `${d.method} ${d.path}` }));
+    return [...changes, ...refused].sort((a, b) => b.t - a.t).slice(0, limit);
+  }
 
   /** May this session make the request? admin/local: yes. Member: only shared services/areas. */
   allowed(req, session) {
     if (!session || !session.userId) return true; // main account or local
     const u = this.list.find((x) => x.id === session.userId);
     if (!u || u.enabled === false) return false;
+    if (expired(u)) { this.noteDenied(u, req); return false; }
     if (u.role === 'admin') return true;
-    return memberAllows(u, req.method, req.path);
+    const ok = memberAllows(u, req.method, req.path);
+    if (!ok) this.noteDenied(u, req);
+    return ok;
   }
   /** Shrink lists to the shared services (for members). */
   filterOverview(o, session) {
@@ -177,6 +252,9 @@ class Members {
     r.post('/users', (req, res) => res.json(this.save(req.body || {})));
     r.put('/users/:id', (req, res) => res.json(this.save(req.body || {}, req.params.id)));
     r.delete('/users/:id', (req, res) => { this.remove(req.params.id); res.json({ ok: true }); });
+    r.post('/users/:id/invite', (req, res) => res.json(this.invite(req.params.id, (req.body || {}).hours)));
+    r.delete('/users/:id/invite', (req, res) => { const u = this.get(req.params.id); delete u.invite; this.ctx.settings.save(); res.json(this.pub(u)); });
+    r.get('/users/activity', (req, res) => res.json({ items: this.activity() }));
     r.get('/users/me', (req, res) => { const s = this.ctx.remote.session(req); const u = s && s.userId ? this.list.find((x) => x.id === s.userId) : null; res.json(u ? { ...this.pub(u), main: false } : { name: (s && s.user) || t('local'), role: 'admin', main: true }); });
     r.post('/users/me/password', (req, res) => {
       const s = this.ctx.remote.session(req); const u = s && s.userId ? this.get(s.userId) : null;
@@ -189,4 +267,13 @@ class Members {
   }
 }
 
-module.exports = { Members, AREAS, MEMBER_ROUTES, ADMIN_ONLY, ALWAYS, compile, classify, memberAllows, hashPw, checkPw, ROLE_MEMBER };
+/** Read a small form body (the invitation page posts a plain HTML form; Hostwerk itself only parses JSON). */
+async function readForm(req) {
+  if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body) && Object.keys(req.body).length) return req.body;
+  if (req.readableEnded) return {};
+  let raw = '';
+  for await (const c of req) { raw += c; if (raw.length > 4096) break; }
+  return Object.fromEntries(new URLSearchParams(raw));
+}
+
+module.exports = { Members, readForm, expired, INVITE_HOURS, AREAS, MEMBER_ROUTES, ADMIN_ONLY, ALWAYS, compile, classify, memberAllows, hashPw, checkPw, ROLE_MEMBER };

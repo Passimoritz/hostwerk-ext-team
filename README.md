@@ -11,9 +11,10 @@ Friends and colleagues with their own sign-in for remote access – members only
 ## What it does
 
 - Members with their own sign-in (remote access)
-- Share single services and areas: console, players, backups …
+- A user dialog in four steps (person, role, access, extras) with a summary before saving – “Paul may: Firefight test server – start and stop, console … until 30 Oct”
+- Share single services and **areas per service** (matrix: start/stop, console, players, backups, files, logs) – with templates like “Friend” or “Helper”
 - Members only see their own part of the overview
-- **Invite by link** instead of a password: the person chooses their own password; the link works once and expires after 1 hour to 7 days
+- **Invite by link** instead of a password: the person chooses their own password; the link works once and expires after 1 hour to 7 days – copy it, share it or show the QR code
 - **Rights for a limited time** for helpers – after the end date neither sign-in nor access works
 - **Activity:** what members changed (from Hostwerk's change log) and what they tried without permission
 - The rights rules are an anchored route table; a test reads Hostwerk's routes and fails as soon as a new core route has no decision
@@ -27,6 +28,8 @@ For other extensions (service `users`, check with `typeof users.can === 'functio
 users.can(memberId, 'mc:survival', 'start-stop');            // or { kind: 'minecraft', id: 'survival' } from Hostwerk.services()
 users.byDiscord('123456789012345678');                       // member with this Discord ID or null
 ```
+
+Since 1.3 a member may have areas per service (`serviceAreas: { 'mc:survival': ['start-stop'] }`); a service without an entry uses the global `areas`. `users.can()` already follows this – read the rights through it instead of the stored fields.
 
 ## Install
 

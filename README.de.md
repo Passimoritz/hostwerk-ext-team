@@ -11,9 +11,10 @@ Freunde und Kollegen mit eigener Anmeldung für den Fernzugriff – Mitglieder s
 ## Was sie kann
 
 - Mitglieder mit eigener Anmeldung (Fernzugriff)
-- Einzelne Dienste und Bereiche freigeben: Konsole, Spieler, Backups …
+- Benutzer-Dialog in vier Schritten (Person, Rolle, Zugriff, Extras) mit Zusammenfassung vor dem Speichern – „Paul darf: Firefight Testserver – starten und stoppen, Konsole … bis 30. Okt.“
+- Einzelne Dienste und **Bereiche je Dienst** freigeben (Matrix: Starten/Stoppen, Konsole, Spieler, Sicherungen, Dateien, Protokolle) – mit Vorlagen wie „Freund“ oder „Helfer“
 - Mitglieder sehen in der Übersicht nur ihren Teil
-- **Einladung per Link** statt Passwort: die Person wählt ihr Passwort selbst; der Link gilt einmal und läuft nach 1 Stunde bis 7 Tagen ab
+- **Einladung per Link** statt Passwort: die Person wählt ihr Passwort selbst; der Link gilt einmal und läuft nach 1 Stunde bis 7 Tagen ab – kopieren, teilen oder als QR-Code zeigen
 - **Befristete Rechte** für Helfer auf Zeit – nach dem Enddatum geht weder Anmeldung noch Zugriff
 - **Protokoll:** was Mitglieder geändert haben (aus Hostwerks Änderungs-Protokoll) und was sie ohne Berechtigung versucht haben
 - Die Rechte-Regeln sind eine verankerte Routen-Tabelle; ein Test liest Hostwerks Routen und schlägt fehl, sobald eine neue Kern-Route keine Entscheidung hat
@@ -27,6 +28,8 @@ Für andere Erweiterungen (Dienst `users`, vorher `typeof users.can === 'functio
 users.can(mitgliedId, 'mc:survival', 'start-stop');          // oder { kind: 'minecraft', id: 'survival' } aus Hostwerk.services()
 users.byDiscord('123456789012345678');                       // Mitglied mit dieser Discord-ID oder null
 ```
+
+Seit 1.3 kann ein Mitglied Bereiche je Dienst haben (`serviceAreas: { 'mc:survival': ['start-stop'] }`); ein Dienst ohne Eintrag nutzt die globalen `areas`. `users.can()` beachtet das schon – Rechte also darüber abfragen statt über die gespeicherten Felder.
 
 ## Installieren
 

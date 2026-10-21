@@ -5,7 +5,8 @@
  * passkeys stay in Hostwerk's core, this extension decides what a member may do.
  *   Roles: admin (everything) · member (only shared services and areas)
  *   Rights per member: services = service ids (mc:<id>, game:<id>, web:<id>, dbs:<id>, apps:<id>), areas
- *   (console, players, backups, files, logs, start-stop)
+ *   (console, players, backups, files, logs, start-stop); since 1.3 optionally serviceAreas = { <service id>: [areas] }
+ *   per service – a service without an entry uses the global areas (data from older versions keeps working as it was)
  * Enforced in the API (Hostwerk asks allowed(req, session) before every request); the local app is always admin.
  * Rights can end on a date ("until"); members can be invited with a link that expires instead of passing on a password.
  * Activity: changes from Hostwerk's change log by members plus refused attempts (kept here, the last 200).
@@ -142,13 +143,34 @@ function classify(method, p, shared = new Set()) {
   return null;
 }
 
+/**
+ * Which areas apply to which kind of service – read from the route table itself, so the dialog only offers what really
+ * does something (a database has no console, a game server no files). { mc: ['start-stop', …], game: […], … }
+ */
+const KINDS = ['mc', 'game', 'web', 'dbs', 'apps'];
+const KIND_AREAS = (() => {
+  const out = Object.fromEntries(KINDS.map((k) => [k, new Set()]));
+  for (const [, tpl, kind, area] of MEMBER_ROUTES) {
+    // 'svc' = /logs/<service>, /stats/<service>: Minecraft, Apps und (über die nackte Kennung) Webserver/Datenbanken
+    const kinds = kind === 'svc' ? ['mc', 'apps', 'web', 'dbs'] : [kind || tpl.split('/')[1]];
+    for (const k of kinds) if (out[k]) out[k].add(area);
+  }
+  return Object.fromEntries(KINDS.map((k) => [k, Object.keys(AREAS).filter((a) => out[k].has(a))]));
+})();
+
+/** The areas of one shared service: its own list (serviceAreas, since 1.3) or else the member's global areas. */
+function areasFor(u, service) {
+  const own = u.serviceAreas && Object.prototype.hasOwnProperty.call(u.serviceAreas, service) ? u.serviceAreas[service] : null;
+  return Array.isArray(own) ? own : (u.areas || []);
+}
+
 /** May a member with these rights make this request? (role admin and local sessions are handled before) */
 function memberAllows(u, method, p) {
-  const svc = new Set(u.services || []); const areas = new Set(u.areas || []);
+  const svc = new Set(u.services || []);
   const c = classify(method, p, svc);
   if (!c) return false;
   if (c.always) return true;
-  return svc.has(c.service) && areas.has(c.rule.area);
+  return svc.has(c.service) && areasFor(u, c.service).includes(c.rule.area);
 }
 
 class Members {
@@ -194,6 +216,12 @@ class Members {
     let u = id ? this.get(id) : null;
     if (!u) { u = { id: crypto.randomBytes(4).toString('hex'), created: Date.now() }; this.list.push(u); }
     Object.assign(u, { name, role: b.role === 'admin' ? 'admin' : ROLE_MEMBER, enabled: b.enabled !== false, services: Array.isArray(b.services) ? b.services.filter((x) => /^(mc|game|web|dbs|apps):[\w-]+$/.test(x)).slice(0, 100) : (u.services || []), areas: Array.isArray(b.areas) ? b.areas.filter((x) => AREAS[x]) : (u.areas || ['start-stop', 'console', 'players']), note: String(b.note || '').slice(0, 200) });
+    // Bereiche je Dienst (seit 1.3): nur für freigegebene Dienste und bekannte Bereiche; null = wieder global, fehlt = bleibt
+    let per = b.serviceAreas === undefined ? u.serviceAreas : b.serviceAreas;
+    if (per && typeof per === 'object' && !Array.isArray(per)) {
+      per = Object.fromEntries(u.services.filter((s) => Array.isArray(per[s])).map((s) => [s, [...new Set(per[s].filter((x) => AREAS[x]))]]));
+      if (Object.keys(per).length) u.serviceAreas = per; else delete u.serviceAreas;
+    } else delete u.serviceAreas;
     if (until !== undefined) u.until = until;
     if (discordId !== undefined) { if (discordId) u.discordId = discordId; else delete u.discordId; }
     if (typeof b.password === 'string' && b.password) { if (b.password.length < 8) throw new Error(t('Password: at least 8 characters.')); u.passHash = hashPw(b.password); }
@@ -217,6 +245,18 @@ class Members {
     const r = this.ctx.remote && this.ctx.remote.status ? this.ctx.remote.status() : {};
     const base = r.domain ? `https://${r.domain}${r.port && r.port !== 443 ? `:${r.port}` : ''}/` : (r.urls && r.urls[0]) || '/';
     return { link: `${base.replace(/\/$/, '')}/api/team/invite/${token}`, until: u.invite.until, remoteEnabled: !!r.enabled };
+  }
+  /**
+   * QR code of an invitation link as an SVG data address (for the phone camera) – with Hostwerk's bundled "qrcode"
+   * library; without it (older Hostwerk, tests) null, the dialog then only shows the link.
+   */
+  async qr(link) {
+    try {
+      const lib = this.host.lib ? this.host.lib('qrcode') : null;
+      if (!lib || !/^https?:\/\//.test(link)) return null;
+      const svg = await lib.toString(link, { type: 'svg', margin: 1, width: 200, errorCorrectionLevel: 'M' });
+      return `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
+    } catch { return null; }
   }
   /** The user an invitation token belongs to (valid and not used yet), else null. */
   byInvite(token) {
@@ -265,7 +305,7 @@ class Members {
     if (u.role === 'admin') return true;
     const key = typeof service === 'string' ? service : service && serviceKey(service.kind, service.id);
     if (!key || !AREAS[area]) return false;
-    return (u.services || []).includes(key) && (u.areas || []).includes(area);
+    return (u.services || []).includes(key) && areasFor(u, key).includes(area);
   }
   /** Member with this Discord user id (switched on, not expired) – null if none. */
   byDiscord(discordId) {
@@ -296,11 +336,11 @@ class Members {
   }
   routes(r) {
     const { t } = this;
-    r.get('/users', (req, res) => res.json({ users: this.list.map((u) => this.pub(u)), areas: Object.fromEntries(Object.entries(AREAS).map(([k, v]) => [k, t(v)])), services: this.services(), remoteEnabled: !!this.ctx.remote.cfg.enabled, mainUser: this.ctx.remote.cfg.user || 'admin' }));
+    r.get('/users', (req, res) => res.json({ users: this.list.map((u) => this.pub(u)), areas: Object.fromEntries(Object.entries(AREAS).map(([k, v]) => [k, t(v)])), kindAreas: KIND_AREAS, services: this.services(), remoteEnabled: !!this.ctx.remote.cfg.enabled, mainUser: this.ctx.remote.cfg.user || 'admin' }));
     r.post('/users', (req, res) => res.json(this.save(req.body || {})));
     r.put('/users/:id', (req, res) => res.json(this.save(req.body || {}, req.params.id)));
     r.delete('/users/:id', (req, res) => { this.remove(req.params.id); res.json({ ok: true }); });
-    r.post('/users/:id/invite', (req, res) => res.json(this.invite(req.params.id, (req.body || {}).hours)));
+    r.post('/users/:id/invite', async (req, res) => { const inv = this.invite(req.params.id, (req.body || {}).hours); res.json({ ...inv, qr: await this.qr(inv.link) }); });
     r.delete('/users/:id/invite', (req, res) => { const u = this.get(req.params.id); delete u.invite; this.ctx.settings.save(); res.json(this.pub(u)); });
     r.get('/users/activity', (req, res) => res.json({ items: this.activity() }));
     r.get('/users/me', (req, res) => { const s = this.ctx.remote.session(req); const u = s && s.userId ? this.list.find((x) => x.id === s.userId) : null; res.json(u ? { ...this.pub(u), main: false } : { name: (s && s.user) || t('local'), role: 'admin', main: true }); });
@@ -324,4 +364,4 @@ async function readForm(req) {
   return Object.fromEntries(new URLSearchParams(raw));
 }
 
-module.exports = { Members, readForm, expired, serviceKey, DISCORD_ID, INVITE_HOURS, AREAS, MEMBER_ROUTES, ADMIN_ONLY, ALWAYS, compile, classify, memberAllows, hashPw, checkPw, ROLE_MEMBER };
+module.exports = { Members, readForm, expired, serviceKey, DISCORD_ID, INVITE_HOURS, AREAS, KIND_AREAS, areasFor, MEMBER_ROUTES, ADMIN_ONLY, ALWAYS, compile, classify, memberAllows, hashPw, checkPw, ROLE_MEMBER };

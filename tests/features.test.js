@@ -76,3 +76,41 @@ test('invitation form: JSON body or a plain form', async () => {
   req.body = {};
   assert.deepStrictEqual(await readForm(req), { password: 'abc def', repeat: 'x' });
 });
+
+test('areas per service (1.3): own list per service, else the global areas as before', () => {
+  const { KIND_AREAS } = require('../server/members');
+  const users = new Members(host());
+  // aus der Routen-Tabelle: Minecraft hat alles, Datenbanken nur Starten/Stoppen und Protokolle, Spiele keine Dateien
+  assert.deepStrictEqual(KIND_AREAS.mc, ['start-stop', 'console', 'players', 'backups', 'files', 'logs']);
+  assert.ok(!KIND_AREAS.game.includes('files') && KIND_AREAS.game.includes('players'));
+  assert.deepStrictEqual(KIND_AREAS.dbs, ['start-stop', 'logs']);
+  const u = users.save({ name: 'Paul', services: ['mc:test', 'web:apache'], areas: ['start-stop', 'console', 'logs'], serviceAreas: { 'mc:test': ['start-stop', 'console', 'fly'], 'web:apache': ['logs'], 'mc:other': ['files'] } });
+  assert.deepStrictEqual(u.serviceAreas, { 'mc:test': ['start-stop', 'console'], 'web:apache': ['logs'] }, 'only shared services and known areas');
+  const can = (m, p) => users.allowed({ method: m, path: p }, { userId: u.id });
+  assert.ok(can('POST', '/mc/servers/test/command'));
+  assert.ok(!can('POST', '/web/apache/start'), 'start/stop is global but not for the web server');
+  assert.ok(can('GET', '/web/apache/logs/error'));
+  assert.ok(!can('GET', '/logs/mc:test'), 'logs only for the web server');
+  assert.ok(users.can(u.id, 'mc:test', 'console') && !users.can(u.id, 'web:apache', 'start-stop'));
+  // ohne serviceAreas im Aufruf bleibt die Aufteilung; null schaltet zurück auf global
+  users.save({ ...users.pub(users.list[0]), serviceAreas: undefined }, u.id);
+  assert.ok(users.list[0].serviceAreas);
+  users.save({ name: 'Paul', services: ['mc:test'], areas: ['logs'] }, u.id);
+  assert.deepStrictEqual(users.list[0].serviceAreas, { 'mc:test': ['start-stop', 'console'] }, 'unshared services drop out');
+  users.save({ name: 'Paul', services: ['mc:test'], areas: ['logs'], serviceAreas: null }, u.id);
+  assert.ok(!('serviceAreas' in users.list[0]));
+  assert.ok(can('GET', '/logs/mc:test') && !can('POST', '/mc/servers/test/command'), 'global areas again');
+});
+
+test('invitation QR code: SVG data address with Hostwerk\'s library, null without it', async () => {
+  const h = host();
+  const users = new Members(h);
+  assert.strictEqual(await users.qr('https://home.example.com/api/team/invite/x'), null, 'no library');
+  h.lib = (n) => { assert.strictEqual(n, 'qrcode'); return { toString: async (text) => `<svg>${text.length}</svg>` }; };
+  const q = await users.qr('https://home.example.com/api/team/invite/x');
+  assert.match(q, /^data:image\/svg\+xml;base64,/);
+  assert.strictEqual(Buffer.from(q.split(',')[1], 'base64').toString(), '<svg>42</svg>');
+  assert.strictEqual(await users.qr('/api/team/invite/x'), null, 'only full addresses');
+  h.lib = () => { throw new Error('lib: qrcode is not bundled'); };
+  assert.strictEqual(await users.qr('https://a.b/c'), null);
+});

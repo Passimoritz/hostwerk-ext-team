@@ -16,30 +16,109 @@ const AREAS = { 'start-stop': 'Start, stop, restart', console: 'Console and comm
 const hashPw = (pw) => { const salt = crypto.randomBytes(16); return `scrypt$${salt.toString('hex')}$${crypto.scryptSync(String(pw), salt, 32).toString('hex')}`; };
 const checkPw = (pw, stored) => { try { const [, s, h] = String(stored || '').split('$'); return crypto.timingSafeEqual(crypto.scryptSync(String(pw), Buffer.from(s, 'hex'), 32), Buffer.from(h, 'hex')); } catch { return false; } };
 
-/** Which service and area does an API request touch? null = not a member-reachable request. Pure, tested. */
-const RULES = [
-  [/^\/mc\/servers\/([^/]+)\/(start|stop|restart)$/, 'mc', 'start-stop'], [/^\/mc\/servers\/([^/]+)\/(command)$/, 'mc', 'console'], [/^\/mc\/servers\/([^/]+)\/(players|whitelist|ops|ban|kick)/, 'mc', 'players'], [/^\/mc\/servers\/([^/]+)\/(backups?|backup)/, 'mc', 'backups'], [/^\/mc\/servers\/([^/]+)\/(files|file)/, 'mc', 'files'], [/^\/mc\/servers\/([^/]+)$/, 'mc', 'start-stop', 'GET'], [/^\/mc\/servers\/([^/]+)\/(stats|ping|selftest|gamerules|worlds|plugins|updates)/, 'mc', 'start-stop', 'GET'],
-  [/^\/games\/([^/]+)\/(start|stop|restart|monitor)$/, 'game', 'start-stop'], [/^\/games\/([^/]+)\/(console|command|details)/, 'game', 'console'], [/^\/games\/([^/]+)\/(backup|backups)/, 'game', 'backups'], [/^\/games\/([^/]+)$/, 'game', 'start-stop', 'GET'],
-  [/^\/(web|dbs|apps)\/([^/]+)\/(start|stop|restart)$/, null, 'start-stop'], [/^\/(web|dbs|apps)\/([^/]+)$/, null, 'start-stop', 'GET'],
-  [/^\/logs\/(mc:|app:)?([^/]+)$/, null, 'logs', 'GET'], [/^\/stats\/(mc:|app:)?([^/]+)$/, null, 'logs', 'GET'],
+/**
+ * What a member may reach – a table of route templates instead of loose regular expressions: every entry is anchored,
+ * so a new core route never slips in by prefix (e.g. /live/remote/logout-all, /discord-bot). Routes under a shared
+ * service that are not listed here are refused; tests/routes.test.js reads Hostwerk's route list and fails for every
+ * service route that is neither here nor in ADMIN_ONLY – a new core route always gets a decision.
+ *   [method or '*', template, kind, area]  – :id = the shared service, kind null = the first path part (web, dbs, apps)
+ */
+const MEMBER_ROUTES = [
+  // Minecraft
+  ['POST', '/mc/servers/:id/start', 'mc', 'start-stop'], ['POST', '/mc/servers/:id/stop', 'mc', 'start-stop'], ['POST', '/mc/servers/:id/restart', 'mc', 'start-stop'], ['POST', '/mc/servers/:id/kill', 'mc', 'start-stop'],
+  ['GET', '/mc/servers/:id', 'mc', 'start-stop'], ['GET', '/mc/servers/:id/stats', 'mc', 'start-stop'], ['GET', '/mc/servers/:id/selftest', 'mc', 'start-stop'], ['GET', '/mc/servers/:id/ping', 'mc', 'start-stop'],
+  ['GET', '/mc/servers/:id/gamerules', 'mc', 'start-stop'], ['GET', '/mc/servers/:id/worlds', 'mc', 'start-stop'], ['GET', '/mc/servers/:id/icon', 'mc', 'start-stop'],
+  ['GET', '/mc/servers/:id/plugins', 'mc', 'start-stop'], ['GET', '/mc/servers/:id/plugins/icon', 'mc', 'start-stop'], ['GET', '/mc/servers/:id/plugins/sources', 'mc', 'start-stop'], ['GET', '/mc/servers/:id/plugins/updates', 'mc', 'start-stop'],
+  ['POST', '/mc/servers/:id/command', 'mc', 'console'],
+  ['GET', '/mc/servers/:id/logs', 'mc', 'logs'],
+  ['*', '/mc/servers/:id/players', 'mc', 'players'], ['*', '/mc/servers/:id/players/*', 'mc', 'players'], ['*', '/mc/servers/:id/whitelist', 'mc', 'players'], ['*', '/mc/servers/:id/ops', 'mc', 'players'], ['*', '/mc/servers/:id/ban', 'mc', 'players'], ['*', '/mc/servers/:id/kick', 'mc', 'players'],
+  ['GET', '/mc/servers/:id/backups', 'mc', 'backups'], ['POST', '/mc/servers/:id/backups', 'mc', 'backups'], ['POST', '/mc/servers/:id/backups/restore', 'mc', 'backups'],
+  ['GET', '/mc/servers/:id/backups/:file/download', 'mc', 'backups'], ['DELETE', '/mc/servers/:id/backups/:file', 'mc', 'backups'], ['GET', '/mc/servers/:id/worlds/:name/download', 'mc', 'backups'],
+  ['*', '/mc/servers/:id/files', 'mc', 'files'], ['*', '/mc/servers/:id/files/*', 'mc', 'files'],
+  // Spiele-Server (Erweiterung „Spiele-Server“): /games/:id/:command startet, stoppt, startet neu …
+  ...['start', 'stop', 'restart', 'kill', 'monitor'].map((c) => ['POST', `/games/:id/${c}`, 'game', 'start-stop']), ['GET', '/games/:id', 'game', 'start-stop'], ['GET', '/games/:id/quick', 'game', 'start-stop'],
+  ['GET', '/games/:id/console', 'game', 'console'], ['GET', '/games/:id/commands', 'game', 'console'], ['GET', '/games/:id/details', 'game', 'console'], ['POST', '/games/:id/send', 'game', 'console'],
+  ['GET', '/games/:id/players', 'game', 'players'],
+  ['GET', '/games/:id/backups', 'game', 'backups'], ['POST', '/games/:id/backups/:file/restore', 'game', 'backups'], ['DELETE', '/games/:id/backups/:file', 'game', 'backups'],
+  // Webserver, Datenbanken, Apps
+  ...['web', 'dbs', 'apps'].flatMap((k) => [['POST', `/${k}/:id/start`, null, 'start-stop'], ['POST', `/${k}/:id/stop`, null, 'start-stop'], ['POST', `/${k}/:id/restart`, null, 'start-stop'], ['POST', `/${k}/:id/kill`, null, 'start-stop'], ['GET', `/${k}/:id`, null, 'start-stop']]),
+  ['GET', '/web/:id/logs/:which', null, 'logs'],
+  // Protokolle und Verlauf eines Dienstes: /logs/mc:<id>, /logs/app:<id>, /logs/<id>
+  ['GET', '/logs/:svc', 'svc', 'logs'], ['GET', '/stats/:svc', 'svc', 'logs'],
 ];
+
+/**
+ * Routes under a service that stay with the admins – even if every area is shared (settings, versions, plugins, market,
+ * deleting the service …). Listed on purpose, so the route test can tell "decided" from "forgotten".
+ */
+const ADMIN_ONLY = [
+  'DELETE /mc/servers/:id', 'PUT /mc/servers/:id', 'DELETE /mc/servers/:id/icon', 'PUT /mc/servers/:id/icon', 'POST /mc/servers/:id/gamerules', 'PUT /mc/servers/:id/gamerules',
+  'GET /mc/servers/:id/properties', 'PUT /mc/servers/:id/properties', 'POST /mc/servers/:id/version', 'POST /mc/servers/:id/deploy', 'POST /mc/servers/:id/selftest',
+  'GET /mc/servers/:id/client-pack', 'GET /mc/servers/:id/client-pack/download', 'GET /mc/servers/:id/hostwerk-plugins', 'GET /mc/servers/:id/live-update', 'PUT /mc/servers/:id/live-update',
+  'POST /mc/servers/:id/live-update/bridge', 'POST /mc/servers/:id/live-update/script', 'GET /mc/servers/:id/map', 'POST /mc/servers/:id/map', 'GET /mc/servers/:id/market', 'GET /mc/servers/:id/market-updates',
+  'GET /mc/servers/:id/market/:source/:pid', 'POST /mc/servers/:id/market/install', 'GET /mc/servers/:id/modpack/updates', 'POST /mc/servers/:id/modpack/update', 'GET /mc/servers/:id/modrinth', 'POST /mc/servers/:id/modrinth',
+  'GET /mc/servers/:id/network', 'POST /mc/servers/:id/network', 'POST /mc/servers/:id/network/lobby', 'DELETE /mc/servers/:id/plugins/:file', 'DELETE /mc/servers/:id/plugins/source', 'PUT /mc/servers/:id/plugins/source',
+  'POST /mc/servers/:id/plugins/source/open', 'POST /mc/servers/:id/plugins/source/resume', 'POST /mc/servers/:id/plugins/sources/check', 'POST /mc/servers/:id/plugins/sources/rescan', 'POST /mc/servers/:id/plugins/sources/update',
+  'POST /mc/servers/:id/plugins/toggle', 'POST /mc/servers/:id/plugins/update', 'POST /mc/servers/:id/plugins/upload', 'GET /mc/servers/:id/safe-upgrade', 'POST /mc/servers/:id/safe-upgrade', 'GET /mc/servers/:id/safe-upgrade/history',
+  'POST /mc/servers/:id/safe-upgrade/check', 'POST /mc/servers/:id/updates/check', 'POST /mc/servers/:id/worlds/:name/reset',
+  'POST /games/:id/:command', 'DELETE /games/:id', 'PUT /games/:id', 'GET /games/:id/config', 'PUT /games/:id/config', 'PUT /games/:id/limits', 'PUT /games/:id/quick', 'GET /games/:id/textfile', 'PUT /games/:id/textfile',
+  ...['web', 'dbs', 'apps'].flatMap((k) => [`DELETE /${k}/:id`, `PUT /${k}/:id`]),
+  'POST /apps/:id/install-deps', 'POST /dbs/:id/password', 'POST /dbs/:id/upgrade', 'GET /dbs/:id/backups', 'POST /dbs/:id/backups', 'POST /dbs/:id/backups/restore', 'GET /dbs/:id/backups/:file/download', 'DELETE /dbs/:id/backups/:file', 'PUT /dbs/:id/backups/config',
+  'GET /web/:id/conf', 'PUT /web/:id/conf', 'GET /web/:id/latest', 'GET /web/:id/projects', 'POST /web/:id/test', 'POST /web/:id/upgrade', 'POST /web/:id/vhosts', 'PUT /web/:id/vhosts/:vid', 'DELETE /web/:id/vhosts/:vid', 'DELETE /web/:id/logs/:which',
+  'DELETE /logs/:svc',
+];
+
+/** Always allowed (exact paths): overview and lists come back filtered; own session and own password. */
+const ALWAYS = [
+  ['GET', '/overview'], ['GET', '/summary'], ['GET', '/app/ping'], ['GET', '/settings'], ['GET', '/jobs'], ['GET', '/jobs/:id'], ['GET', '/push'], ['GET', '/users/me'],
+  ['*', '/live/remote/logout'], ['*', '/users/me/password'], ['*', '/pw/shared/mine'], ['*', '/pw/shared/mine/reveal'],
+  // Listen: nur Lesen, Hostwerk filtert sie auf die freigegebenen Dienste
+  ['GET', '/mc/servers'], ['GET', '/games'], ['GET', '/web'], ['GET', '/dbs'], ['GET', '/apps'],
+];
+
+/** Route template → anchored regular expression; :id is captured, other :params and * match one or more parts. */
+function compile(tpl) {
+  const keys = [];
+  const src = tpl.split('/').map((part) => {
+    if (part === '*') return '.+';
+    if (part.startsWith(':')) { keys.push(part.slice(1)); return '([^/]+)'; }
+    return part.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+  }).join('/');
+  return { re: new RegExp(`^${src}$`), keys };
+}
+const COMPILED = MEMBER_ROUTES.map(([method, tpl, kind, area]) => ({ method, tpl, kind, area, ...compile(tpl) }));
+const ALWAYS_COMPILED = ALWAYS.map(([method, tpl]) => ({ method, ...compile(tpl) }));
+
+/** Which shared service does a match concern? /logs/mc:<id> → mc:<id>, /logs/app:<id> → apps:<id>, /web/<id> → web:<id> */
+function serviceOf(r, params, p, shared) {
+  if (r.kind === 'svc') {
+    const raw = params.svc || '';
+    if (raw.startsWith('mc:')) return `mc:${raw.slice(3)}`;
+    if (raw.startsWith('app:')) return `apps:${raw.slice(4)}`;
+    return [...shared].find((s) => s.endsWith(`:${raw}`) && /^(web|dbs):/.test(s)) || `web:${raw}`;
+  }
+  return `${r.kind || p.split('/')[1]}:${params.id}`;
+}
+
+/** Which rule answers a request: { always } | { rule, service } | null (nothing for members). Pure, tested. */
+function classify(method, p, shared = new Set()) {
+  for (const a of ALWAYS_COMPILED) if ((a.method === '*' || a.method === method) && a.re.test(p)) return { always: true };
+  for (const r of COMPILED) {
+    if (r.method !== '*' && r.method !== method) continue;
+    const m = r.re.exec(p); if (!m) continue;
+    const params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
+    return { rule: r, service: serviceOf(r, params, p, shared) };
+  }
+  return null;
+}
 
 /** May a member with these rights make this request? (role admin and local sessions are handled before) */
 function memberAllows(u, method, p) {
   const svc = new Set(u.services || []); const areas = new Set(u.areas || []);
-  // Always allowed: overview (filtered), own session, own shared passwords (the password extension checks each entry)
-  if (method === 'GET' && /^\/(overview|summary|app\/ping|settings|discord|jobs|push|users\/me)/.test(p)) return true;
-  if (/^\/(live\/remote\/logout|users\/me\/password)/.test(p)) return true;
-  if (/^\/pw\/shared\/mine(\/reveal)?$/.test(p)) return true;
-  for (const [re, kind, area, onlyMethod] of RULES) {
-    const x = p.match(re); if (!x) continue;
-    if (onlyMethod && method !== onlyMethod) continue;
-    let id;
-    if (kind) id = `${kind}:${x[1]}`; else if (/^\/(web|dbs|apps)/.test(p)) id = `${x[1]}:${x[2]}`; else id = `${x[1] ? x[1].replace(':', '') : ''}:${x[2]}`.replace(/^:/, '');
-    if (!kind && /^\/(logs|stats)\//.test(p)) { const raw = x[2]; id = x[1] === 'mc:' ? `mc:${raw}` : x[1] === 'app:' ? `apps:${raw}` : [...svc].find((s) => s.endsWith(`:${raw}`)) || `web:${raw}`; }
-    return svc.has(id) && areas.has(area);
-  }
-  return method === 'GET' && /^\/(mc\/servers|games|web|dbs|apps)$/.test(p); // lists: yes (filtered)
+  const c = classify(method, p, svc);
+  if (!c) return false;
+  if (c.always) return true;
+  return svc.has(c.service) && areas.has(c.rule.area);
 }
 
 class Members {
@@ -110,4 +189,4 @@ class Members {
   }
 }
 
-module.exports = { Members, AREAS, RULES, memberAllows, hashPw, checkPw, ROLE_MEMBER };
+module.exports = { Members, AREAS, MEMBER_ROUTES, ADMIN_ONLY, ALWAYS, compile, classify, memberAllows, hashPw, checkPw, ROLE_MEMBER };

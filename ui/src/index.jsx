@@ -16,7 +16,7 @@ const dateText = (ts) => new Date(ts).toLocaleDateString(locale(), { day: 'numer
 const dateInput = (ts) => { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
 function UserDialog({ u, data, onClose, onSaved }) {
-  const [f, setF] = useState(u ? { ...u, password: '', until: u.until ? dateInput(u.until) : '' } : { name: '', role: MEMBER, password: '', services: [], areas: ['start-stop', 'console', 'players'], enabled: true, note: '', until: '' });
+  const [f, setF] = useState(u ? { ...u, password: '', until: u.until ? dateInput(u.until) : '', discordId: u.discordId || '' } : { name: '', role: MEMBER, password: '', services: [], areas: ['start-stop', 'console', 'players'], enabled: true, note: '', until: '', discordId: '' });
   const [inviteNew, setInviteNew] = useState(!u);
   const [busy, setBusy] = useState(false);
   const toggle = (k, v) => setF({ ...f, [k]: f[k].includes(v) ? f[k].filter((x) => x !== v) : [...f[k], v] });
@@ -32,6 +32,7 @@ function UserDialog({ u, data, onClose, onSaved }) {
           {(u || !inviteNew) && <Field label={u ? 'New password (empty = unchanged)' : 'Password (at least 8 characters)'}><input className="input" type="password" autoComplete="new-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></Field>}
           <Field label="Rights until (optional)" hint="For helpers for a while: after this day the person can no longer sign in."><input className="input" type="date" min={dateInput(Date.now() + 86400000)} value={f.until} onChange={(e) => setF({ ...f, until: e.target.value })} /></Field>
           <Field label="Role" className="span-2"><Seg value={f.role} onChange={(v) => setF({ ...f, role: v })} options={[{ id: MEMBER, label: 'Member – only what is shared', icon: UserCheck }, { id: 'admin', label: 'Admin – everything', icon: Shield }]} /></Field>
+          <Field label={<>Discord ID (optional) <InfoTip title="Discord ID">With it the Discord bot knows this person and allows exactly what you share here. In Discord: Settings → Advanced → Developer mode, then right-click the person → Copy user ID.</InfoTip></>}><input className="input mono" inputMode="numeric" value={f.discordId} onChange={(e) => setF({ ...f, discordId: e.target.value.replace(/\D/g, '').slice(0, 20) })} placeholder="e.g. 123456789012345678" /></Field>
           <Field label="Note" className="span-2"><input className="input" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="e.g. friend, may restart the survival server" /></Field>
         </div>
         {f.role === MEMBER && (
@@ -124,7 +125,7 @@ export function Members() {
           <div key={u.id} className="list-item" style={{ opacity: u.enabled === false ? 0.55 : 1 }}>
             <div className="ico">{u.role === 'admin' ? <Shield /> : <UserCheck />}</div>
             <div className="grow small" style={{ minWidth: 0 }}><b>{u.name}</b> <span className="badge">{u.role === 'admin' ? t('Admin') : t('Member')}</span>{u.enabled === false && <span className="badge warn">off</span>}{u.expired ? <span className="badge warn">Expired</span> : u.until ? <span className="badge" title={t('Rights until {when}', { when: fmtDate(u.until) })}><CalendarClock size={11} /> {t('until {when}', { when: dateText(u.until) })}</span> : null}{!u.hasPassword && <span className="badge">{u.invite ? t('Invited') : t('No password yet')}</span>}
-              <div className="tiny muted ellipsis">{[u.role === 'admin' ? t('Everything') : t('{s} service(s) · {a} area(s)', { s: (u.services || []).length, a: (u.areas || []).length }), u.note, u.lastLogin && t('last seen {when}', { when: fmtDate(u.lastLogin) })].filter(Boolean).join(' · ')}</div>
+              <div className="tiny muted ellipsis">{[u.role === 'admin' ? t('Everything') : t('{s} service(s) · {a} area(s)', { s: (u.services || []).length, a: (u.areas || []).length }), u.note, u.discordId && t('Discord linked'), u.lastLogin && t('last seen {when}', { when: fmtDate(u.lastLogin) })].filter(Boolean).join(' · ')}</div>
             </div>
             <Switch checked={u.enabled !== false} onChange={async (v) => { try { await put(`/users/${u.id}`, { ...u, enabled: v }); d.reload(); } catch (e) { toast.error(e); } }} />
             <Btn className="xs ghost" icon={Link2} onClick={() => setInvite(u)} title={t('Invitation link for {name}', { name: u.name })}>Invite</Btn>

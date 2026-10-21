@@ -1,3 +1,8 @@
+## 1.2.0
+
+- Discord ID per member: the Discord bot recognises the person and allows exactly what is shared here – no own roles needed. / Discord-ID je Mitglied: der Discord-Bot erkennt die Person und erlaubt genau das hier Freigegebene.
+- For other extensions: `users.can(memberId, serviceId, area)` – “may this member do that?” with the same rules as remote access (also with `{ kind, id }` from `Hostwerk.services()`), `users.byDiscord(id)` and `users.serviceKey(kind, id)`. / Für andere Erweiterungen: `users.can(…)`, `users.byDiscord(…)`, `users.serviceKey(…)`.
+
 ## 1.1.0
 
 - Rights rules as an anchored route table – loose prefixes let members reach "log out everyone" (/live/remote/logout-all) and the Discord bot settings; "kill", Minecraft logs, game console and game players now work as shared. / Rechte-Regeln verankert; Lücken bei logout-all und discord-bot geschlossen, kill/Logs/Spiele-Konsole funktionieren.

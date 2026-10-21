@@ -17,8 +17,16 @@ Freunde und Kollegen mit eigener Anmeldung für den Fernzugriff – Mitglieder s
 - **Befristete Rechte** für Helfer auf Zeit – nach dem Enddatum geht weder Anmeldung noch Zugriff
 - **Protokoll:** was Mitglieder geändert haben (aus Hostwerks Änderungs-Protokoll) und was sie ohne Berechtigung versucht haben
 - Die Rechte-Regeln sind eine verankerte Routen-Tabelle; ein Test liest Hostwerks Routen und schlägt fehl, sobald eine neue Kern-Route keine Entscheidung hat
+- **Discord-ID je Mitglied** – der Discord-Bot erlaubt dann genau das, was du hier freigibst
 - Team-Einrichtungen aus einem geteilten Ordner
 - Anmeldung und Passkeys bleiben in Hostwerk selbst
+
+Für andere Erweiterungen (Dienst `users`, vorher `typeof users.can === 'function'` prüfen – ab 1.2):
+
+```js
+users.can(mitgliedId, 'mc:survival', 'start-stop');          // oder { kind: 'minecraft', id: 'survival' } aus Hostwerk.services()
+users.byDiscord('123456789012345678');                       // Mitglied mit dieser Discord-ID oder null
+```
 
 ## Installieren
 

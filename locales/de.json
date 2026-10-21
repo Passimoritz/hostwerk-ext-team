@@ -137,5 +137,12 @@
   "Choose your password for Hostwerk. You then sign in with the name “{name}”.": "Wähle dein Passwort für Hostwerk. Danach meldest du dich mit dem Namen „{name}“ an.",
   "All set": "Fertig",
   "Your password is saved. Sign in with the name “{name}”.": "Dein Passwort ist gespeichert. Melde dich mit dem Namen „{name}“ an.",
+  "Discord ID (optional)": "Discord-ID (optional)",
+  "Discord ID": "Discord-ID",
+  "With it the Discord bot knows this person and allows exactly what you share here. In Discord: Settings → Advanced → Developer mode, then right-click the person → Copy user ID.": "Damit erkennt der Discord-Bot diese Person und erlaubt genau das, was du hier freigibst. In Discord: Einstellungen → Erweitert → Entwicklermodus, dann Rechtsklick auf die Person → Benutzer-ID kopieren.",
+  "e.g. 123456789012345678": "z. B. 123456789012345678",
+  "Discord linked": "mit Discord verknüpft",
+  "Discord ID: 17–20 digits (Discord → Settings → Advanced → Developer mode, then right-click the user → Copy user ID).": "Discord-ID: 17–20 Ziffern (Discord → Einstellungen → Erweitert → Entwicklermodus, dann Rechtsklick auf die Person → Benutzer-ID kopieren).",
+  "This Discord ID already belongs to another member.": "Diese Discord-ID gehört schon einem anderen Mitglied.",
   "$patterns": []
 }

@@ -10,6 +10,8 @@
  * Rights can end on a date ("until"); members can be invited with a link that expires instead of passing on a password.
  * Activity: changes from Hostwerk's change log by members plus refused attempts (kept here, the last 200).
  * Data stays where it always was: settings.users (role values "admin" / "mitglied" as before).
+ * For other extensions ("users" service, since 1.2): can(memberId, serviceId, area) – "may this member do that?" with the
+ * same rules as remote access; byDiscord(id) – member with this Discord user id (e.g. for the Discord bot).
  */
 const crypto = require('crypto');
 const fs = require('fs');
@@ -19,6 +21,11 @@ const INVITE_HOURS = [1, 24, 72, 168];
 const DENIED_KEEP = 200;
 const sha = (x) => crypto.createHash('sha256').update(String(x)).digest('hex');
 const esc = (x) => String(x == null ? '' : x).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+/** Discord user ids are "snowflakes": 17–20 digits. */
+const DISCORD_ID = /^\d{17,20}$/;
+/** Service id as in this extension from a kind of Hostwerk.services() / host.services.list() (minecraft → mc:<id> …). */
+const KIND_PREFIX = { minecraft: 'mc', mc: 'mc', game: 'game', web: 'web', db: 'dbs', dbs: 'dbs', app: 'apps', apps: 'apps', docker: 'apps' };
+function serviceKey(kind, id) { const k = KIND_PREFIX[String(kind || '')]; return k && id != null && String(id) !== '' ? `${k}:${id}` : null; }
 /** Rights with an end date: expired = the member can no longer sign in or do anything. */
 const expired = (u, now = Date.now()) => !!(u && u.until && Number(u.until) <= now);
 
@@ -177,10 +184,18 @@ class Members {
       until = b.until === null || b.until === '' ? null : typeof b.until === 'number' ? b.until : Date.parse(String(b.until));
       if (until !== null && !(Number.isFinite(until) && until > Date.now())) throw new Error(t('The end date must be in the future.'));
     }
+    // Discord-ID (für den Discord-Bot): leer = keine; eine ID gehört höchstens einem Mitglied
+    let discordId;
+    if (b.discordId !== undefined) {
+      discordId = String(b.discordId || '').trim();
+      if (discordId && !DISCORD_ID.test(discordId)) throw new Error(t('Discord ID: 17–20 digits (Discord → Settings → Advanced → Developer mode, then right-click the user → Copy user ID).'));
+      if (discordId && this.list.some((x) => x.discordId === discordId && x.id !== id)) throw new Error(t('This Discord ID already belongs to another member.'));
+    }
     let u = id ? this.get(id) : null;
     if (!u) { u = { id: crypto.randomBytes(4).toString('hex'), created: Date.now() }; this.list.push(u); }
     Object.assign(u, { name, role: b.role === 'admin' ? 'admin' : ROLE_MEMBER, enabled: b.enabled !== false, services: Array.isArray(b.services) ? b.services.filter((x) => /^(mc|game|web|dbs|apps):[\w-]+$/.test(x)).slice(0, 100) : (u.services || []), areas: Array.isArray(b.areas) ? b.areas.filter((x) => AREAS[x]) : (u.areas || ['start-stop', 'console', 'players']), note: String(b.note || '').slice(0, 200) });
     if (until !== undefined) u.until = until;
+    if (discordId !== undefined) { if (discordId) u.discordId = discordId; else delete u.discordId; }
     if (typeof b.password === 'string' && b.password) { if (b.password.length < 8) throw new Error(t('Password: at least 8 characters.')); u.passHash = hashPw(b.password); }
     this.ctx.settings.save();
     return this.pub(u);
@@ -239,6 +254,27 @@ class Members {
     if (!ok) this.noteDenied(u, req);
     return ok;
   }
+  /**
+   * May this member do this? Same rules as remote access, for other extensions (e.g. the Discord bot):
+   *   memberId: id of the member · service: "mc:<id>" or { kind, id } from Hostwerk.services() · area: AREAS key
+   * Admin: everything. Member: the service is shared AND the area is allowed. Switched off, expired or unknown: no.
+   */
+  can(memberId, service, area = 'start-stop') {
+    const u = this.list.find((x) => x.id === memberId);
+    if (!u || u.enabled === false || expired(u)) return false;
+    if (u.role === 'admin') return true;
+    const key = typeof service === 'string' ? service : service && serviceKey(service.kind, service.id);
+    if (!key || !AREAS[area]) return false;
+    return (u.services || []).includes(key) && (u.areas || []).includes(area);
+  }
+  /** Member with this Discord user id (switched on, not expired) – null if none. */
+  byDiscord(discordId) {
+    const d = String(discordId || '');
+    if (!DISCORD_ID.test(d)) return null;
+    const u = this.list.find((x) => x.discordId === d && x.enabled !== false && !expired(x));
+    return u ? this.pub(u) : null;
+  }
+  serviceKey(kind, id) { return serviceKey(kind, id); }
   /** Shrink lists to the shared services (for members). */
   filterOverview(o, session) {
     if (!session || !session.userId) return o;
@@ -288,4 +324,4 @@ async function readForm(req) {
   return Object.fromEntries(new URLSearchParams(raw));
 }
 
-module.exports = { Members, readForm, expired, INVITE_HOURS, AREAS, MEMBER_ROUTES, ADMIN_ONLY, ALWAYS, compile, classify, memberAllows, hashPw, checkPw, ROLE_MEMBER };
+module.exports = { Members, readForm, expired, serviceKey, DISCORD_ID, INVITE_HOURS, AREAS, MEMBER_ROUTES, ADMIN_ONLY, ALWAYS, compile, classify, memberAllows, hashPw, checkPw, ROLE_MEMBER };

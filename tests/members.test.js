@@ -88,3 +88,36 @@ test('team setups from a shared folder', async () => {
 test('every German text has a value', () => {
   for (const [k, v] of Object.entries(de)) if (k !== '$patterns') assert.ok(typeof v === 'string' && v.trim(), k);
 });
+
+test('users.can and Discord ID: same rules as remote access, for the Discord bot and other extensions', () => {
+  const h = host('de');
+  const users = new Members(h);
+  const m = users.save({ name: 'Lena', role: 'mitglied', services: ['mc:survival', 'game:valheim'], areas: ['start-stop'], discordId: '123456789012345678' });
+  const a = users.save({ name: 'Boss', role: 'admin', discordId: '' });
+  assert.strictEqual(m.discordId, '123456789012345678');
+  assert.ok(!('discordId' in users.get(a.id)), 'empty = none');
+  // gleiche Discord-ID darf nicht zweimal vergeben werden, falsche Form wird abgelehnt
+  assert.throws(() => users.save({ name: 'Kim', discordId: '123456789012345678' }), /anderen Mitglied/);
+  assert.throws(() => users.save({ name: 'Kim', discordId: '12ab' }), /17–20 Ziffern/);
+  // can(): Dienst freigegeben UND Bereich erlaubt; { kind, id } aus Hostwerk.services() geht auch
+  assert.ok(users.can(m.id, 'mc:survival', 'start-stop'));
+  assert.ok(users.can(m.id, { kind: 'minecraft', id: 'survival' }, 'start-stop'));
+  assert.ok(users.can(m.id, { kind: 'game', id: 'valheim' }));
+  assert.ok(!users.can(m.id, 'mc:survival', 'console'), 'area not allowed');
+  assert.ok(!users.can(m.id, 'mc:creative', 'start-stop'), 'service not shared');
+  assert.ok(!users.can(m.id, 'mc:survival', 'fly'), 'unknown area');
+  assert.ok(users.can(a.id, 'web:anything', 'files'), 'admin: everything');
+  assert.ok(!users.can('nobody', 'mc:survival'));
+  assert.strictEqual(users.serviceKey('db', 'main'), 'dbs:main'); assert.strictEqual(users.serviceKey('docker', 'redis'), 'apps:redis'); assert.strictEqual(users.serviceKey('mail', 'mail'), null);
+  // byDiscord: nur eingeschaltete, nicht abgelaufene
+  assert.strictEqual(users.byDiscord('123456789012345678').name, 'Lena');
+  assert.strictEqual(users.byDiscord('999999999999999999'), null); assert.strictEqual(users.byDiscord('x'), null);
+  users.get(m.id).enabled = false;
+  assert.strictEqual(users.byDiscord('123456789012345678'), null);
+  assert.ok(!users.can(m.id, 'mc:survival', 'start-stop'), 'switched off');
+  users.get(m.id).enabled = true; users.get(m.id).until = Date.now() - 1000;
+  assert.ok(!users.can(m.id, 'mc:survival', 'start-stop'), 'expired');
+  // Discord-ID entfernen
+  users.get(m.id).until = null;
+  assert.ok(!('discordId' in users.save({ name: 'Lena', discordId: '' }, m.id)));
+});

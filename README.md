@@ -17,8 +17,16 @@ Friends and colleagues with their own sign-in for remote access – members only
 - **Rights for a limited time** for helpers – after the end date neither sign-in nor access works
 - **Activity:** what members changed (from Hostwerk's change log) and what they tried without permission
 - The rights rules are an anchored route table; a test reads Hostwerk's routes and fails as soon as a new core route has no decision
+- **Discord ID per member** – the Discord bot then allows exactly what you share here
 - Team setups from a shared folder
 - Sign-in and passkeys stay in Hostwerk itself
+
+For other extensions (service `users`, check with `typeof users.can === 'function'` – since 1.2):
+
+```js
+users.can(memberId, 'mc:survival', 'start-stop');            // or { kind: 'minecraft', id: 'survival' } from Hostwerk.services()
+users.byDiscord('123456789012345678');                       // member with this Discord ID or null
+```
 
 ## Install
 

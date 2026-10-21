@@ -56,6 +56,12 @@ const MEMBER_ROUTES = [
   ['GET', '/web/:id/logs/:which', null, 'logs'],
   // Protokolle und Verlauf eines Dienstes: /logs/mc:<id>, /logs/app:<id>, /logs/<id>
   ['GET', '/logs/:svc', 'svc', 'logs'], ['GET', '/stats/:svc', 'svc', 'logs'],
+  // Hostwerk 2.12/3.0: Minecraft-Protokolle, Absturzberichte, TPS, Datapacks ansehen, Plugin-Formulare, Vorgenerieren ansehen
+  ['GET', '/mc/servers/:id/logfiles', 'mc', 'logs'], ['GET', '/mc/servers/:id/logfiles/:file', 'mc', 'logs'], ['GET', '/mc/servers/:id/crash-reports', 'mc', 'logs'], ['GET', '/mc/servers/:id/crash-reports/:file', 'mc', 'logs'],
+  ['GET', '/mc/servers/:id/tps', 'mc', 'start-stop'], ['GET', '/mc/servers/:id/datapacks', 'mc', 'start-stop'], ['GET', '/mc/servers/:id/pregen', 'mc', 'start-stop'],
+  ['GET', '/mc/servers/:id/plugin-forms', 'mc', 'files'], ['PUT', '/mc/servers/:id/plugin-forms/:form', 'mc', 'files'],
+  // Webserver: Auswertung, Gesundheit und PHP-Cache ansehen
+  ['GET', '/web/:id/stats', null, 'logs'], ['GET', '/web/:id/health', null, 'logs'], ['POST', '/web/:id/health', null, 'logs'], ['GET', '/web/:id/cache', null, 'logs'],
 ];
 
 /**
@@ -77,6 +83,12 @@ const ADMIN_ONLY = [
   'POST /apps/:id/install-deps', 'POST /dbs/:id/password', 'POST /dbs/:id/upgrade', 'GET /dbs/:id/backups', 'POST /dbs/:id/backups', 'POST /dbs/:id/backups/restore', 'GET /dbs/:id/backups/:file/download', 'DELETE /dbs/:id/backups/:file', 'PUT /dbs/:id/backups/config',
   'GET /web/:id/conf', 'PUT /web/:id/conf', 'GET /web/:id/latest', 'GET /web/:id/projects', 'POST /web/:id/test', 'POST /web/:id/upgrade', 'POST /web/:id/vhosts', 'PUT /web/:id/vhosts/:vid', 'DELETE /web/:id/vhosts/:vid', 'DELETE /web/:id/logs/:which',
   'DELETE /logs/:svc',
+  // Hostwerk 2.12/3.0: Datapacks ändern, Welten ersetzen, Server kopieren, Vorgenerieren steuern, PHP-Cache leeren, Datenbank-Hauptversion und Tabellen-Sicherungen
+  'GET /mc/servers/:id/datapacks-market', 'POST /mc/servers/:id/datapacks-market', 'POST /mc/servers/:id/datapacks/upload', 'PUT /mc/servers/:id/datapacks/:name', 'DELETE /mc/servers/:id/datapacks/:name',
+  'POST /mc/servers/:id/worlds/import', 'POST /mc/servers/:id/worlds/upload', 'POST /mc/servers/:id/copy', 'POST /mc/servers/:id/pregen', 'POST /mc/servers/:id/pregen/:action', 'POST /mc/servers/:id/pregen/install',
+  'POST /web/:id/cache/reset',
+  'GET /dbs/:id/major', 'POST /dbs/:id/major', 'POST /dbs/:id/major/rollback', 'DELETE /dbs/:id/major/previous',
+  'GET /dbs/:id/backups/:file/tables', 'POST /dbs/:id/backups/restore-table', 'POST /dbs/:id/backups/upload',
 ];
 
 /** Always allowed (exact paths): overview and lists come back filtered; own session and own password. */

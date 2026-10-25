@@ -43,5 +43,13 @@
     "*": [
       "tabs"
     ]
-  }
+  },
+  "data": {
+    "settings": [
+      "team"
+    ]
+  },
+  "liveEvents": [
+    "team"
+  ]
 }

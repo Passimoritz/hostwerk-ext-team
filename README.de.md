@@ -4,7 +4,7 @@
 
 Freunde und Kollegen mit eigener Anmeldung für den Fernzugriff – Mitglieder sehen und steuern nur, was du freigibst. Dazu gemeinsame Team-Einrichtungen aus einem geteilten Ordner.
 
-[English](README.md) · Offizielle [Hostwerk](https://github.com/Passimoritz/hostwerk-public)-Erweiterung (SDK 2.7, native Erweiterung)
+[English](README.md) · Offizielle [Hostwerk](https://github.com/Passimoritz/hostwerk-public)-Erweiterung (native Erweiterung, ab Hostwerk 2.9)
 
 ![Bildschirmfoto](docs/screenshot.de.png)
 

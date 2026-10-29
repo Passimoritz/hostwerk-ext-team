@@ -7,7 +7,8 @@ import './style.css';
 
 /*
  * Team & roles: members with their own sign-in for remote access who only see and control what you share, and team setups
- * from a shared folder or address. The member list also stays where it was: "Go live → Users" (slot "live.tabs").
+ * from a shared folder or address. The member list also stays in Go live: "Go live → Access → Users" (place "live.zugriff",
+ * SDK 3.11; older Hostwerk: the tab "Go live → Users", slot "live.tabs").
  * The user dialog has four steps (person, role, access, extras) and a summary; access is a matrix "service × area"
  * (since 1.3 the areas are stored per service – serviceAreas – and the global list is their union for older readers).
  */
@@ -340,7 +341,7 @@ function InviteDialog({ u, initial = null, onClose, onDone }) {
         ) : (
           <div className="team-invite">
             <div className="stack team-invite-main">
-              {!res.remoteEnabled && <Callout kind="warn" dismissible={false}>Remote access is off – switch it on under Go live → Remote access, otherwise the link does not open.</Callout>}
+              {!res.remoteEnabled && <Callout kind="warn" dismissible={false}>Remote access is off – switch it on under Go live → Access → Remote access, otherwise the link does not open.</Callout>}
               <p className="small">{t('Send {name} this link – by chat, mail or let them scan the QR code with the phone camera.', { name: u.name })}</p>
               <code className="team-link">{res.link}</code>
               <div className="row">
@@ -413,7 +414,7 @@ function AccessChips({ u, data }) {
   );
 }
 
-/** Members with roles (same component as the "Users" tab under Go live). */
+/** Members with roles (same component as the "Users" section under Go live → Access). */
 export function Members() {
   const d = useApi('/users', [], { live: false, poll: true });
   const [edit, setEdit] = useState(undefined);
@@ -428,10 +429,10 @@ export function Members() {
           <InfoTip title="How roles work">Every person signs in to remote access with their own name and password (or passkey). Members only see and control the services and areas you share – for example “start the survival server and manage players”. The change log shows who did what.</InfoTip>
           <div className="right"><Btn className="primary sm" icon={Plus} onClick={() => setEdit(null)}>Add user</Btn></div>
         </div>
-        {!remoteEnabled && <div className="card-body"><Callout kind="info" dismissible={false}>Remote access is off – users can only sign in once it is switched on under Go live → Remote access.</Callout></div>}
+        {!remoteEnabled && <div className="card-body"><Callout kind="info" dismissible={false}>Remote access is off – users can only sign in once it is switched on under Go live → Access → Remote access.</Callout></div>}
         <div className="list-item team-member" data-no-row-menu="">
           <Avatar name={mainUser} admin />
-          <div className="grow small"><div className="team-member-head"><b>{mainUser}</b><span className="badge">Main account</span></div><div className="tiny muted">{t('Admin · password and 2FA under Go live → Remote access')}</div></div>
+          <div className="grow small"><div className="team-member-head"><b>{mainUser}</b><span className="badge">Main account</span></div><div className="tiny muted">{t('Admin · password and 2FA under Go live → Access → Remote access')}</div></div>
         </div>
         {users.map((u) => (
           <div key={u.id} className={`list-item team-member ${u.enabled === false ? 'team-member-off' : ''}`}>
@@ -524,5 +525,9 @@ function TeamPage({ path = [] }) {
 
 export default {
   pages: { main: TeamPage },
-  slots: { 'live.tabs': [{ id: 'benutzer', title: 'Users', icon: UsersIcon, Component: Members, order: 70 }] },
+  // Hostwerk with SDK 3.11: a section in Go live → Access (#/live/zugriff/benutzer)
+  sections: { 'live.zugriff': [{ id: 'benutzer', title: 'Users', icon: UsersIcon, Component: Members, order: 70 }] },
+  // Older Hostwerk (before SDK 3.11): the tab "Users" in Go live. fallback: true – Hostwerk 3.11 and newer leave it out (the
+  // section above is there), older versions ignore the flag and show the tab as before.
+  slots: { 'live.tabs': [{ id: 'benutzer', title: 'Users', icon: UsersIcon, Component: Members, order: 70, fallback: true }] },
 };

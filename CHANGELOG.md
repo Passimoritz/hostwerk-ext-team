@@ -1,3 +1,7 @@
+## 1.4.0
+
+- Go live in five areas (Hostwerk with SDK 3.11): the users are a section in Go live → Access (#/live/zugriff/benutzer); older Hostwerk versions keep the tab “Users”. Hints name the new place of remote access (Go live → Access → Remote access). / Livebetrieb in fünf Bereichen (Hostwerk mit SDK 3.11): Die Benutzer sind ein Abschnitt unter Livebetrieb → Zugriff (#/live/zugriff/benutzer); ältere Hostwerk-Versionen behalten den Reiter „Benutzer“. Hinweise nennen den neuen Ort des Fernzugriffs (Livebetrieb → Zugriff → Fernzugriff).
+
 ## 1.3.2
 
 - New animated icon and banner in the common Hostwerk style (isometric block). / Neues animiertes Symbol und Banner im gemeinsamen Hostwerk-Stil (isometrischer Block).

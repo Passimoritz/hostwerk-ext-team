@@ -14,6 +14,9 @@ const { MEMBER_ROUTES, ADMIN_ONLY, ALWAYS, classify, memberAllows, AREAS } = req
 
 const HOSTWERK = process.env.HOSTWERK_DIR || path.join(__dirname, '..', '..', '..', 'hostwerk');
 const GAMES = path.join(__dirname, '..', '..', 'hostwerk-ext-game-servers', 'server');
+// Minecraft lives in its own extension since Hostwerk 3.1 (same addresses /mc/servers/…)
+const MINECRAFT = path.join(__dirname, '..', '..', 'hostwerk-ext-minecraft', 'server');
+const extRoutes = () => [GAMES, MINECRAFT].filter((d) => fs.existsSync(d)).flatMap((d) => routesIn(d));
 const SERVICE_ROUTE = /^\/(mc\/servers|games|web|dbs|apps)\/:id(\/|$)|^\/(logs|stats)\/:svc$/;
 
 /** All "<METHOD> <template>" of r.get('/…') / api.post('/…') … in the JavaScript files below dir (no node_modules). */
@@ -38,7 +41,7 @@ const nothing = { services: [], areas: [] };
 const have = fs.existsSync(path.join(HOSTWERK, 'server', 'index.js'));
 
 test('every service route of Hostwerk has a decision (member area or admin only)', { skip: !have && 'Hostwerk repository not next to this one (set HOSTWERK_DIR)' }, () => {
-  const routes = [...routesIn(path.join(HOSTWERK, 'server')), ...(fs.existsSync(GAMES) ? routesIn(GAMES) : [])];
+  const routes = [...routesIn(path.join(HOSTWERK, 'server')), ...extRoutes()];
   assert.ok(routes.length > 200, `found only ${routes.length} routes – did the route style change?`);
   const admin = new Set(ADMIN_ONLY);
   const undecided = [];
@@ -63,7 +66,7 @@ test('without shares a member reaches only the exact always-allowed routes – n
 });
 
 test('ADMIN_ONLY lists only routes that still exist (no stale decisions)', { skip: !have && 'Hostwerk repository not next to this one' }, () => {
-  const routes = new Set([...routesIn(path.join(HOSTWERK, 'server')), ...(fs.existsSync(GAMES) ? routesIn(GAMES) : [])]);
+  const routes = new Set([...routesIn(path.join(HOSTWERK, 'server')), ...extRoutes()]);
   const stale = ADMIN_ONLY.filter((r) => !routes.has(r));
   assert.deepStrictEqual(stale, []);
 });

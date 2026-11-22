@@ -11,7 +11,8 @@
 .team-step { display: flex; flex-direction: column; gap: var(--sp-3); scroll-margin-top: 56px; }
 .team-step-head { display: flex; align-items: center; gap: var(--sp-2); margin: 0; font-size: var(--fs-md); }
 .team-label { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-sm); font-weight: 600; color: var(--text-2); }
-.team-access-row { gap: var(--sp-3); }
+.team-access-row { gap: var(--sp-3); flex-wrap: wrap; }
+.team-valid { white-space: nowrap; } /* „Link gültig für“ nicht dreizeilig umbrechen – lieber ganz in die nächste Zeile */
 .team-pw, .team-date { max-width: 260px; }
 .team-active { display: flex; align-items: center; gap: var(--sp-2); min-height: var(--control-h); }
 
@@ -77,3 +78,5 @@
   .team-roles, .team-invite { grid-template-columns: minmax(0, 1fr); }
   .team-qr { align-items: flex-start; }
 }
+/* Freigabe auf einen gelöschten Dienst (fällt beim nächsten Speichern weg) */
+.team-chip.team-chip-gone { color: var(--warn-text, var(--warn)); border-style: dashed; }

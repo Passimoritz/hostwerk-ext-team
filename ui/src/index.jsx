@@ -18,7 +18,7 @@ const locale = () => (document.documentElement.lang === 'en' ? 'en-GB' : 'de-DE'
 const dateText = (ts) => new Date(ts).toLocaleDateString(locale(), { day: 'numeric', month: 'short', year: 'numeric' });
 const dateInput = (ts) => { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const endOfDay = (day) => new Date(`${day}T23:59:59`).getTime();
-const NAME_OK = /^[\w.@ -]{2,40}$/;
+const NAME_OK = /^[\w.@ -]{2,40}$/; // wie der Server (ohne Umlaute – die Fernzugriff-Anmeldung kann sie nicht)
 
 /* Dienste und Bereiche: Symbol je Art, kurze Spaltennamen und Wörter für die Zusammenfassung */
 const kindOf = (id) => String(id).split(':')[0];
@@ -248,7 +248,7 @@ function UserDialog({ u, data, onClose, onSaved }) {
 
         <Step id={`${uid}-person`} n={1} title="Person">
           <div className="form-grid">
-            <Field label="Name (sign-in name)" hint={f.name && !nameOk ? 'Name: 2–40 characters (letters, digits, dot, @, -, space).' : undefined}>
+            <Field label="Name (sign-in name)" hint={f.name && !nameOk ? 'Name: 2–40 characters (letters A–Z without umlauts, digits, dot, @, -, space).' : undefined}>
               <input className="input" value={f.name} onChange={(e) => set('name')(e.target.value)} autoFocus={!u} autoComplete="off" aria-invalid={f.name && !nameOk ? true : undefined} placeholder="e.g. Paul" />
             </Field>
             <Field label="Can sign in">
@@ -259,7 +259,7 @@ function UserDialog({ u, data, onClose, onSaved }) {
               <div role="group" aria-labelledby={`${uid}-acc`} className="row team-access-row">
                 <Seg value={access} onChange={setAccess} options={accessOptions} />
                 {access === 'invite' && (
-                  <label className="row-tight small">{t('Link valid for')}
+                  <label className="row-tight small team-valid">{t('Link valid for')}
                     <select className="select sm" value={hours} onChange={(e) => setHours(Number(e.target.value))}>{INVITE_VALID.map(([h, l]) => <option key={h} value={h}>{t(l)}</option>)}</select>
                   </label>
                 )}
@@ -367,18 +367,22 @@ function InviteDialog({ u, initial = null, onClose, onDone }) {
 export function Activity() {
   const d = useApi('/users/activity', [], { live: false, poll: true });
   const [who, setWho] = useState('');
+  const [kind, setKind] = useState(''); // '' = alles, change = Änderungen, refused = abgelehnt/abgelaufen
   if (d.error && !d.data) return <div className="card"><Empty icon={History} title="Couldn't load the activity" text={String(d.error.message || d.error)} action={<Btn className="sm" icon={RefreshCw} onClick={() => d.reload()}>Try again</Btn>} /></div>;
   if (!d.data) return <div className="card"><Loading /></div>;
   const names = [...new Set(d.data.items.map((x) => x.user))].sort();
-  const items = d.data.items.filter((x) => !who || x.user === who);
+  const items = d.data.items.filter((x) => (!who || x.user === who) && (!kind || (kind === 'change' ? x.kind === 'change' : x.kind !== 'change')));
   const label = { change: 'Change', denied: 'Refused', expired: 'Rights expired' };
   return (
     <div className="card">
       <div className="card-head"><History size={16} /><h3>Activity</h3><span className="badge">{items.length}</span>
         <InfoTip title="Activity">What members changed (from Hostwerk's change log) and what they tried without permission. Refused attempts are kept here – the last 200.</InfoTip>
-        {names.length > 1 && <div className="right"><select className="select sm" value={who} aria-label="Member" onChange={(e) => setWho(e.target.value)}><option value="">All members</option>{names.map((n) => <option key={n} value={n}>{n}</option>)}</select></div>}
+        <div className="right row-tight">
+          <select className="select sm" value={kind} aria-label={t('What')} onChange={(e) => setKind(e.target.value)}><option value="">{t('Everything')}</option><option value="change">{t('Only changes')}</option><option value="refused">{t('Only refused')}</option></select>
+          {names.length > 1 && <select className="select sm" value={who} aria-label="Member" onChange={(e) => setWho(e.target.value)}><option value="">All members</option>{names.map((n) => <option key={n} value={n}>{n}</option>)}</select>}
+        </div>
       </div>
-      {items.length === 0 ? <Empty icon={History} title="Nothing yet" text="As soon as members change something or try something they may not, it shows up here." /> : items.map((x, i) => (
+      {items.length === 0 ? (d.data.items.length && (who || kind) ? <Empty icon={History} title="Nothing in this view" text="Choose another filter." /> : <Empty icon={History} title="Nothing yet" text="As soon as members change something or try something they may not, it shows up here." />) : items.map((x, i) => (
         <div key={`${x.t}-${i}`} className="list-item">
           <span className={`badge ${x.kind === 'change' ? '' : 'warn'}`}>{t(label[x.kind] || x.kind)}</span>
           <div className="grow small" style={{ minWidth: 0 }}><b>{x.user}</b> <span className="ellipsis">{x.text}</span>{x.device ? <div className="tiny muted">{x.device}</div> : null}</div>
@@ -400,12 +404,12 @@ function AccessChips({ u, data }) {
   if (u.role === 'admin') return <span className="tiny muted">{t('Everything')}</span>;
   const ids = u.services || [];
   if (!ids.length) return <span className="tiny muted">{t('Nothing shared yet')}</span>;
-  const svc = (id) => data.services.find((s) => s.id === id) || { name: id };
+  const svc = (id) => data.services.find((s) => s.id === id) || { name: id, gone: (u.missing || []).includes(id) };
   const areas = (id) => (u.serviceAreas && u.serviceAreas[id]) || u.areas || [];
   return (
     <span className="team-chips">
       {ids.slice(0, 3).map((id) => { const Icon = KIND_ICON[kindOf(id)] || Box; const a = areas(id).filter((x) => applicable(data, id).includes(x)); return (
-        <span key={id} className="team-chip" title={`${svc(id).name}: ${AREA_ORDER.filter((x) => a.includes(x)).map((x) => t(AREA_UI[x].verb)).join(', ') || t('only see it')}`}>
+        svc(id).gone ? <span key={id} className="team-chip team-chip-gone" title={t('This service was deleted – the share goes away the next time you save {name}.', { name: u.name })}><Icon size={11} aria-hidden="true" />{t('Deleted service')}<span className="muted">· {id}</span></span> : <span key={id} className="team-chip" title={`${svc(id).name}: ${AREA_ORDER.filter((x) => a.includes(x)).map((x) => t(AREA_UI[x].verb)).join(', ') || t('only see it')}`}>
           <Icon size={11} aria-hidden="true" />{svc(id).name}<span className="muted">· {t(a.length === 1 ? '{n} area' : '{n} areas', { n: a.length })}</span>
         </span>
       ); })}
@@ -444,6 +448,8 @@ export function Members() {
                 {u.enabled === false && <span className="badge warn">off</span>}
                 {u.expired ? <span className="badge warn">Expired</span> : u.until ? <span className="badge" title={t('Rights until {when}', { when: fmtDate(u.until) })}><CalendarClock size={11} /> {t('until {when}', { when: dateText(u.until) })}</span> : null}
                 {!u.hasPassword && <span className="badge">{u.invite ? t('Invited') : t('No password yet')}</span>}
+                {u.locked && <span className="badge err" title={t('10 failed sign-ins – remote access refuses {name} until {when}.', { name: u.name, when: fmtDate(u.locked.until) })}><KeyRound size={11} /> {t('locked until {when}', { when: fmtDate(u.locked.until) })}</span>}
+                {u.locked && <Btn className="xs ghost" onClick={async () => { try { await post(`/users/${u.id}/unlock`); toast.success(t('{name} can sign in again', { name: u.name })); d.reload(); } catch (e) { toast.error(e); } }}>Unlock</Btn>}
               </div>
               <AccessChips u={u} data={d.data} />
               {(u.note || u.discordId || u.lastLogin) && <div className="tiny muted ellipsis">{[u.note, u.discordId && t('Discord linked'), u.lastLogin && t('last seen {when}', { when: fmtDate(u.lastLogin) })].filter(Boolean).join(' · ')}</div>}
@@ -498,7 +504,7 @@ export function TeamSetup() {
             </div>
             <div className="row">
               <Btn className="sm primary" icon={Download} busy={busy} onClick={async () => { setBusy(true); try { const r = await post('/team/apply'); await waitJob(r.job); toast.success('Team setup taken over'); } catch (e) { toast.error(e); } setBusy(false); load(); }}>Take over</Btn>
-              <Btn className="sm ghost" icon={X} onClick={async () => setS(await post('/team/dismiss'))}>Ignore</Btn>
+              <Btn className="sm ghost" icon={X} onClick={async () => { try { setS(await post('/team/dismiss')); } catch (e) { toast.error(e); } }}>Ignore</Btn>
             </div>
           </div>
         )}

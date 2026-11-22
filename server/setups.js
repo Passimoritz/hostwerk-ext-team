@@ -37,12 +37,14 @@ class TeamSetups {
       if (!fs.existsSync(f)) throw new Error(t('There is no {file} in the folder yet.', { file: FILE }));
       text = fs.readFileSync(f, 'utf8');
     } else {
-      const r = await fetch(c.location, { signal: AbortSignal.timeout(20000), headers: { 'Cache-Control': 'no-cache' } });
+      // Netz weg, falscher Name, Zeitüberschreitung: verständlich statt „fetch failed“
+      const r = await fetch(c.location, { signal: AbortSignal.timeout(20000), headers: { 'Cache-Control': 'no-cache' } }).catch(() => { throw new Error(t('The address cannot be reached – check the link and the internet connection.')); });
       if (!r.ok) throw new Error(t('The address answers with {status}', { status: r.status }));
       text = await r.text();
     }
-    const profile = JSON.parse(text);
-    if (profile.hostwerkProfile !== 1) throw new Error(t('The file is not a Hostwerk setup.'));
+    let profile;
+    try { profile = JSON.parse(text); } catch { throw new Error(t('The file is not a Hostwerk setup.')); }
+    if (!profile || profile.hostwerkProfile !== 1) throw new Error(t('The file is not a Hostwerk setup.'));
     return { profile, hash: crypto.createHash('sha256').update(text).digest('hex').slice(0, 16) };
   }
 
@@ -78,11 +80,16 @@ class TeamSetups {
   async configure(b) {
     const { t } = this;
     const c = this.cfg;
-    c.source = ['folder', 'url'].includes(b.source) ? b.source : null;
-    c.location = String(b.location || '').trim();
-    if (c.source === 'folder' && c.location && !fs.existsSync(c.location)) throw new Error(t('Folder not found.'));
-    if (c.source === 'url' && !/^https:\/\//.test(c.location)) throw new Error(t('Please enter an https:// address.'));
+    // erst prüfen, dann übernehmen – eine abgelehnte Eingabe darf die bisherige Verbindung nicht ersetzen
+    const source = ['folder', 'url'].includes(b.source) ? b.source : null;
+    const location = String(b.location || '').trim();
+    if (source === 'folder' && !(location && fs.existsSync(location) && fs.statSync(location).isDirectory())) throw new Error(t('Folder not found.'));
+    if (source === 'url' && !/^https:\/\/[^\s/]+/.test(location)) throw new Error(t('Please enter an https:// address.'));
+    c.source = source;
+    c.location = source ? location : '';
     c.lastHash = null;
+    this.pending = null;
+    if (!source) { c.error = null; c.lastCheck = null; } // getrennt: keine alte Fehlermeldung stehen lassen
     this.ctx.settings.save();
     return this.check();
   }
@@ -104,11 +111,13 @@ class TeamSetups {
   publish(note) {
     const c = this.cfg;
     if (c.source !== 'folder') throw new Error(this.t('Publishing only works with a shared folder (addresses can only be read).'));
+    if (!fs.existsSync(c.location)) throw new Error(this.t('Folder not found.')); // z. B. Netzlaufwerk getrennt
     const profile = { ...this.ctx.profile.export(), team: { note: String(note || '').slice(0, 200), author: require('os').userInfo().username } };
     const text = JSON.stringify(profile, null, 2);
     fs.writeFileSync(path.join(c.location, FILE), text);
     c.appliedHash = crypto.createHash('sha256').update(text).digest('hex').slice(0, 16);
     c.lastHash = c.appliedHash;
+    c.error = null; c.lastCheck = Date.now(); // die Datei liegt jetzt da – alte Meldung („noch keine Datei“) weg
     this.pending = null;
     this.ctx.settings.save();
     return this.state();

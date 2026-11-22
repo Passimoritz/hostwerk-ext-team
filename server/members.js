@@ -26,11 +26,16 @@ const esc = (x) => String(x == null ? '' : x).replace(/[&<>"']/g, (c) => ({ '&':
 const DISCORD_ID = /^\d{17,20}$/;
 /** Service id as in this extension from a kind of Hostwerk.services() / host.services.list() (minecraft → mc:<id> …). */
 const KIND_PREFIX = { minecraft: 'mc', mc: 'mc', game: 'game', web: 'web', db: 'dbs', dbs: 'dbs', app: 'apps', apps: 'apps', docker: 'apps' };
+/** Fields of /overview a member keeps (everything else – e.g. legacy lists of other service kinds – is left out). */
+const OVERVIEW_KEEP = new Set(['app', 'web', 'db', 'php', 'mail', 'apps', 'kinds', 'liveEvents', 'aiGroups', 'capabilities', 'tunnels', 'ai', 'live', 'jobs', 'minecraft', 'games']);
 function serviceKey(kind, id) { const k = KIND_PREFIX[String(kind || '')]; return k && id != null && String(id) !== '' ? `${k}:${id}` : null; }
 /** Rights with an end date: expired = the member can no longer sign in or do anything. */
 const expired = (u, now = Date.now()) => !!(u && u.until && Number(u.until) <= now);
 
 const ROLE_MEMBER = 'mitglied'; // stored value (kept for existing data)
+/** Sign-in name: A–Z, digits, _ . @ - and space. No umlauts: Hostwerk's remote sign-in compares names byte by byte and
+ *  answers a name with ä, é … with an error (core remote.js /login) – such a member could never sign in. */
+const NAME_RE = /^[\w.@ -]{2,40}$/;
 const AREAS = { 'start-stop': 'Start, stop, restart', console: 'Console and commands', players: 'Manage players (whitelist, ban, op)', backups: 'Create/restore backups', files: 'Files of the service', logs: 'Read logs' };
 const hashPw = (pw) => { const salt = crypto.randomBytes(16); return `scrypt$${salt.toString('hex')}$${crypto.scryptSync(String(pw), salt, 32).toString('hex')}`; };
 const checkPw = (pw, stored) => { try { const [, s, h] = String(stored || '').split('$'); return crypto.timingSafeEqual(crypto.scryptSync(String(pw), Buffer.from(s, 'hex'), 32), Buffer.from(h, 'hex')); } catch { return false; } };
@@ -51,7 +56,7 @@ const MEMBER_ROUTES = [
   ['POST', '/mc/servers/:id/command', 'mc', 'console'],
   ['GET', '/mc/servers/:id/logs', 'mc', 'logs'],
   ['*', '/mc/servers/:id/players', 'mc', 'players'], ['*', '/mc/servers/:id/players/*', 'mc', 'players'], ['*', '/mc/servers/:id/whitelist', 'mc', 'players'], ['*', '/mc/servers/:id/ops', 'mc', 'players'], ['*', '/mc/servers/:id/ban', 'mc', 'players'], ['*', '/mc/servers/:id/kick', 'mc', 'players'],
-  ['GET', '/mc/servers/:id/backups', 'mc', 'backups'], ['GET', '/mc/servers/:id/nightly-backup', 'mc', 'backups'], ['POST', '/mc/servers/:id/backups', 'mc', 'backups'], ['POST', '/mc/servers/:id/backups/restore', 'mc', 'backups'],
+  ['GET', '/mc/servers/:id/backups', 'mc', 'backups'], ['GET', '/mc/servers/:id/nightly-backup', 'mc', 'backups'], ['POST', '/mc/servers/:id/backups', 'mc', 'backups'], ['POST', '/mc/servers/:id/backups/restore', 'mc', 'backups'], ['GET', '/mc/servers/:id/backups/check', 'mc', 'backups'],
   ['GET', '/mc/servers/:id/backups/:file/download', 'mc', 'backups'], ['DELETE', '/mc/servers/:id/backups/:file', 'mc', 'backups'], ['GET', '/mc/servers/:id/worlds/:name/download', 'mc', 'backups'],
   ['*', '/mc/servers/:id/files', 'mc', 'files'], ['*', '/mc/servers/:id/files/*', 'mc', 'files'],
   // Spiele-Server (Erweiterung „Spiele-Server“): /games/:id/:command startet, stoppt, startet neu …
@@ -70,6 +75,11 @@ const MEMBER_ROUTES = [
   ['GET', '/mc/servers/:id/plugin-forms', 'mc', 'files'], ['PUT', '/mc/servers/:id/plugin-forms/:form', 'mc', 'files'],
   // Webserver: Auswertung, Gesundheit und PHP-Cache ansehen
   ['GET', '/web/:id/stats', null, 'logs'], ['GET', '/web/:id/health', null, 'logs'], ['POST', '/web/:id/health', null, 'logs'], ['GET', '/web/:id/cache', null, 'logs'],
+  // Minecraft-Erweiterung (Hostwerk 3.1+): Zustand und Dimensionen ansehen, Neustart mit Vorwarnung, Bedrock-Spielerlisten
+  ['GET', '/mc/servers/:id/health', 'mc', 'start-stop'], ['GET', '/mc/servers/:id/dimensions', 'mc', 'start-stop'], ['POST', '/mc/servers/:id/restart-warn', 'mc', 'start-stop'],
+  // Bild eines freigegebenen Dienstes (Übersicht, Seitenleiste) – nur ansehen; ändern bleibt beim Besitzer
+  ['GET', '/icons/mc/:id', 'mc', 'start-stop'], ['GET', '/icons/game/:id', 'game', 'start-stop'], ['GET', '/icons/web/:id', 'web', 'start-stop'], ['GET', '/icons/db/:id', 'dbs', 'start-stop'], ['GET', '/icons/app/:id', 'apps', 'start-stop'],
+  ['GET', '/mc/servers/:id/bedrock', 'mc', 'players'], ['POST', '/mc/servers/:id/bedrock/allowlist', 'mc', 'players'], ['PUT', '/mc/servers/:id/bedrock/permission', 'mc', 'players'],
 ];
 
 /**
@@ -99,6 +109,8 @@ const ADMIN_ONLY = [
   'GET /web/:id/sites/:vid/htaccess', 'PUT /web/:id/sites/:vid/htaccess', 'POST /web/:id/sites/:vid/files',
   'GET /dbs/:id/major', 'POST /dbs/:id/major', 'POST /dbs/:id/major/rollback', 'DELETE /dbs/:id/major/previous',
   'GET /dbs/:id/backups/:file/tables', 'POST /dbs/:id/backups/restore-table', 'POST /dbs/:id/backups/upload',
+  // Minecraft-Erweiterung (Hostwerk 3.1+): MOTD ändern, Bedrock-Versionen prüfen und einspielen; Datenbank-Versionen
+  'PUT /mc/servers/:id/motd', 'POST /mc/servers/:id/bedrock/check', 'POST /mc/servers/:id/bedrock/update', 'GET /dbs/:id/versions',
 ];
 
 /** Always allowed (exact paths): overview and lists come back filtered; own session and own password. */
@@ -175,6 +187,27 @@ function memberAllows(u, method, p) {
   return svc.has(c.service) && areasFor(u, c.service).includes(c.rule.area);
 }
 
+/**
+ * Answers of the always-allowed lists for a member (Hostwerk itself does not filter them): only the shared services, the
+ * settings only with what the interface needs (theme, language …) – never the member list with password hashes, remote
+ * access, notification targets or settings of other extensions. Pure, tested.
+ */
+const MEMBER_LISTS = { '/mc/servers': 'mc', '/games': 'game', '/web': 'web', '/dbs': 'dbs', '/apps': 'apps' };
+const GENERAL_KEEP = ['theme', 'language', 'linksInApp', 'ui'];
+function memberAnswer(u, p, body) {
+  if (!body || typeof body !== 'object') return body;
+  const svc = new Set(u.services || []);
+  const only = (list, prefix) => (Array.isArray(list) ? list : []).filter((x) => x && svc.has(`${prefix}:${x.id}`));
+  const prefix = MEMBER_LISTS[p];
+  if (prefix) return Array.isArray(body) ? only(body, prefix) : { ...body, servers: only(body.servers, prefix) }; // /games: { servers: […] }
+  if (p === '/settings') { const g = body.general || {}; return { general: Object.fromEntries(GENERAL_KEEP.filter((k) => k in g).map((k) => [k, g[k]])), ai: { disabled: !!(body.ai && body.ai.disabled) } }; }
+  if (p === '/summary') return { ...body, services: body.services ? { ...body.services, errors: [] } : body.services, problems: [] }; // keine Namen fremder Dienste
+  return body;
+}
+/** Mail catcher for members: the overview of Hostwerk expects the object (null breaks two tiles) – only port and state, no mails. */
+const mailStub = (m) => (m && typeof m === 'object' ? { installed: !!m.installed, config: { smtpPort: (m.config && m.config.smtpPort) || null }, count: 0, unread: 0, trash: 0, proc: { state: (m.proc && m.proc.state) || 'stopped' } } : null);
+const FILTERED = new Set([...Object.keys(MEMBER_LISTS), '/settings', '/summary']);
+
 class Members {
   constructor(host) {
     this.host = host; this.ctx = host.ctx; this.t = host.t;
@@ -182,25 +215,69 @@ class Members {
     this.denied = this.readDenied();
   }
   readDenied() { try { return JSON.parse(fs.readFileSync(path.join(this.dir, 'denied.json'), 'utf8')); } catch { return []; } }
-  /** Refused attempt of a member – noted (the same request at most once a minute), so the owner sees who tried what. */
+  /**
+   * Refused attempt of a member – noted (the same request at most every 10 minutes), so the owner sees who tried what.
+   * Not only the last entry counts: the interface of a member asks for several owner-only things in the background in turn
+   * (extensions, security, updates …) – compared with the last entry alone they filled the 200 places within a minute.
+   */
   noteDenied(u, req) {
     const now = Date.now();
-    const last = this.denied[0];
-    if (last && last.user === u.name && last.method === req.method && last.path === req.path && now - last.t < 60000) return;
+    const key = `${u.id}|${req.method}|${req.path}`;
+    this.deniedSeen = this.deniedSeen || new Map();
+    if (now - (this.deniedSeen.get(key) || 0) < 600000) return;
+    if (this.deniedSeen.size > 2000) this.deniedSeen.clear();
+    this.deniedSeen.set(key, now);
     this.denied.unshift({ t: now, user: u.name, method: req.method, path: String(req.path).slice(0, 200), reason: expired(u, now) ? 'expired' : 'denied' });
     this.denied = this.denied.slice(0, DENIED_KEEP);
     if (!this.dir) return;
     try { fs.mkdirSync(this.dir, { recursive: true }); fs.writeFileSync(path.join(this.dir, 'denied.json.tmp'), JSON.stringify(this.denied)); fs.renameSync(path.join(this.dir, 'denied.json.tmp'), path.join(this.dir, 'denied.json')); } catch { /* nur Protokoll */ }
   }
   get list() { const s = this.ctx.settings.get(); if (!s.users) s.users = []; return s.users; }
-  pub(u) { const { passHash, invite, ...rest } = u; return { ...rest, hasPassword: !!passHash, expired: expired(u), invite: invite && invite.until > Date.now() ? { until: invite.until } : null }; }
+  pub(u) { const { passHash, invite, ...rest } = u; return { ...rest, hasPassword: !!passHash, expired: expired(u), invite: invite && invite.until > Date.now() ? { until: invite.until } : null, locked: this.lockOf(u) }; }
+  /** Sperre des Fernzugriffs für dieses Konto ({ until, level }) oder null – Mitglieder wundern sich sonst über die abgelehnte Anmeldung. */
+  lockOf(u, now = Date.now()) {
+    const rm = this.ctx.remote;
+    if (!rm || !u || !u.name) return null;
+    try {
+      const key = typeof rm.accountKey === 'function' ? rm.accountKey(u.name) : String(u.name).trim().toLowerCase();
+      const b = rm.accountBans && rm.accountBans[key];
+      return b && b.until > now ? { until: b.until, level: b.level || 1 } : null;
+    } catch { return null; }
+  }
+  /** Sperre aufheben (wie „Entsperren“ unter Livebetrieb → Zugriff → Fernzugriff). */
+  unlock(id) {
+    const u = this.get(id);
+    const rm = this.ctx.remote;
+    if (!rm || !rm.accountBans) return this.pub(u);
+    const key = typeof rm.accountKey === 'function' ? rm.accountKey(u.name) : String(u.name).trim().toLowerCase();
+    delete rm.accountBans[key];
+    if (rm.accountFails && typeof rm.accountFails.delete === 'function') rm.accountFails.delete(key);
+    this.ctx.settings.save();
+    return this.pub(u);
+  }
+  /**
+   * Bekannte Dienste für Freigaben: ids (mc:…, game:…) und die Arten, deren Verwaltung gerade da ist. Eine Freigabe auf einen
+   * gelöschten Dienst ist „missing“ – nur wenn seine Art da ist (eine ausgeschaltete Erweiterung löscht keine Freigaben).
+   */
+  serviceIndex() {
+    const list = this.services();
+    const { ctx } = this;
+    const have = { mc: ctx.minecraft, game: ctx.games, web: ctx.web, dbs: ctx.dbm, apps: ctx.apps };
+    const prefixes = new Set(Object.entries(have).filter(([, m]) => m && typeof m.list === 'function').map(([p]) => p));
+    const ids = new Set(list.map((s) => s.id));
+    return { ids, prefixes, missing: (id) => !ids.has(id) && prefixes.has(String(id).split(':')[0]) };
+  }
   get(id) { const u = this.list.find((x) => x.id === id); if (!u) throw this.host.error(404, 'User not found'); return u; }
   byName(name) { const n = String(name || '').trim().toLowerCase(); return this.list.find((u) => u.name.toLowerCase() === n && u.enabled !== false) || null; }
   save(b, id = null) {
     const { t } = this;
-    const name = String(b.name || '').trim().slice(0, 40);
-    if (!/^[\w.@ -]{2,40}$/.test(name)) throw new Error(t('Name: 2–40 characters (letters, digits, dot, @, -, space).'));
-    if (name.toLowerCase() === String(this.ctx.remote.cfg.user || 'admin').toLowerCase() && !id) throw new Error(t('This name is the main remote access account.'));
+    const name = String(b.name || '').trim(); // zu lang = Fehler statt stillem Abschneiden
+    if (!NAME_RE.test(name)) throw new Error(t('Name: 2–40 characters (letters A–Z without umlauts, digits, dot, @, -, space).'));
+    const old = id ? this.get(id) : null;
+    // Hauptkonto-Name: neu anlegen nein, umbenennen darauf nein (ein altes Mitglied mit dem Namen darf ihn behalten)
+    if (name.toLowerCase() === String(this.ctx.remote.cfg.user || 'admin').toLowerCase() && (!old || old.name.toLowerCase() !== name.toLowerCase())) throw new Error(t('This name is the main remote access account.'));
+    // Passwort vor dem Anlegen prüfen – sonst bliebe ein halb angelegtes Mitglied in der Liste
+    if (typeof b.password === 'string' && b.password && b.password.length < 8) throw new Error(t('Password: at least 8 characters.'));
     if (this.list.some((u) => u.name.toLowerCase() === name.toLowerCase() && u.id !== id)) throw new Error(t('Name already taken.'));
     // Befristete Rechte: bis zu diesem Zeitpunkt (Millisekunden oder Datum), leer = unbefristet – vor dem Anlegen prüfen
     let until;
@@ -215,9 +292,10 @@ class Members {
       if (discordId && !DISCORD_ID.test(discordId)) throw new Error(t('Discord ID: 17–20 digits (Discord → Settings → Advanced → Developer mode, then right-click the user → Copy user ID).'));
       if (discordId && this.list.some((x) => x.discordId === discordId && x.id !== id)) throw new Error(t('This Discord ID already belongs to another member.'));
     }
-    let u = id ? this.get(id) : null;
+    let u = old;
     if (!u) { u = { id: crypto.randomBytes(4).toString('hex'), created: Date.now() }; this.list.push(u); }
-    Object.assign(u, { name, role: b.role === 'admin' ? 'admin' : ROLE_MEMBER, enabled: b.enabled !== false, services: Array.isArray(b.services) ? b.services.filter((x) => /^(mc|game|web|dbs|apps):[\w-]+$/.test(x)).slice(0, 100) : (u.services || []), areas: Array.isArray(b.areas) ? b.areas.filter((x) => AREAS[x]) : (u.areas || ['start-stop', 'console', 'players']), note: String(b.note || '').slice(0, 200) });
+    const idx = this.serviceIndex(); // Freigaben auf gelöschte Dienste fallen beim Speichern weg
+    Object.assign(u, { name, role: b.role === 'admin' ? 'admin' : ROLE_MEMBER, enabled: b.enabled !== false, services: Array.isArray(b.services) ? b.services.filter((x) => /^(mc|game|web|dbs|apps):[\w-]+$/.test(x) && !idx.missing(x)).slice(0, 100) : (u.services || []), areas: Array.isArray(b.areas) ? b.areas.filter((x) => AREAS[x]) : (u.areas || ['start-stop', 'console', 'players']), note: String(b.note || '').slice(0, 200) });
     // Bereiche je Dienst (seit 1.3): nur für freigegebene Dienste und bekannte Bereiche; null = wieder global, fehlt = bleibt
     let per = b.serviceAreas === undefined ? u.serviceAreas : b.serviceAreas;
     if (per && typeof per === 'object' && !Array.isArray(per)) {
@@ -226,7 +304,7 @@ class Members {
     } else delete u.serviceAreas;
     if (until !== undefined) u.until = until;
     if (discordId !== undefined) { if (discordId) u.discordId = discordId; else delete u.discordId; }
-    if (typeof b.password === 'string' && b.password) { if (b.password.length < 8) throw new Error(t('Password: at least 8 characters.')); u.passHash = hashPw(b.password); }
+    if (typeof b.password === 'string' && b.password) u.passHash = hashPw(b.password);
     this.ctx.settings.save();
     return this.pub(u);
   }
@@ -294,6 +372,11 @@ class Members {
     if (u.role === 'admin') return true;
     const ok = memberAllows(u, req.method, req.path);
     if (!ok) this.noteDenied(u, req);
+    // Immer erlaubte Listen: die Antwort auf die freigegebenen Dienste kürzen (req.res = Antwort dieser Anfrage in Express)
+    else if (req.method === 'GET' && FILTERED.has(req.path) && req.res && typeof req.res.json === 'function') {
+      const res = req.res; const json = res.json.bind(res); const p = req.path;
+      res.json = (body) => json(res.statusCode < 400 ? memberAnswer(u, p, body) : body);
+    }
     return ok;
   }
   /**
@@ -323,22 +406,31 @@ class Members {
     const u = this.list.find((x) => x.id === session.userId);
     if (!u || u.role === 'admin') return o;
     const svc = new Set(u.services || []);
-    return { ...o, web: (o.web || []).filter((x) => svc.has(`web:${x.id}`)), db: (o.db || []).filter((x) => svc.has(`dbs:${x.id}`)), minecraft: (o.minecraft || []).filter((x) => svc.has(`mc:${x.id}`)), apps: (o.apps || []).filter((x) => svc.has(`apps:${x.id}`)), games: (o.games || []).filter((x) => svc.has(`game:${x.id}`)), live: null, mail: null, tunnels: [], member: { name: u.name, areas: u.areas } };
+    const only = (list, prefix) => (Array.isArray(list) ? list : []).filter((x) => x && svc.has(`${prefix}:${x.id}`));
+    // Nur bekannte Felder des Kerns – alte Felder anderer Dienst-Arten (overviewKey, z. B. VMs) kämen sonst ungefiltert mit
+    const out = Object.fromEntries(Object.entries(o).filter(([k]) => OVERVIEW_KEEP.has(k)));
+    // Dienst-Arten der Erweiterungen (SDK 3.5, „kinds“): nur die freigegebenen Dienste; Arten ohne Freigabe-Regel bleiben leer
+    if (o.kinds && typeof o.kinds === 'object') {
+      out.kinds = Object.fromEntries(Object.entries(o.kinds).map(([k, d]) => { const p = KIND_PREFIX[k]; return [k, { ...d, items: p ? only(d && d.items, p) : [] }]; }));
+    }
+    return { ...out, web: only(o.web, 'web'), db: only(o.db, 'dbs'), minecraft: only(o.minecraft, 'mc'), apps: only(o.apps, 'apps'), games: only(o.games, 'game'), live: null, mail: mailStub(o.mail), tunnels: [], member: { name: u.name, areas: u.areas } };
   }
   services() {
     const { ctx, t } = this; const out = [];
-    try {
-      for (const s of ctx.minecraft.list()) out.push({ id: `mc:${s.id}`, name: s.name, kind: 'Minecraft' });
-      for (const g of (ctx.games ? ctx.games.list() : [])) out.push({ id: `game:${g.id}`, name: g.name, kind: t('Game server') });
-      for (const w of ctx.web.list()) out.push({ id: `web:${w.id}`, name: w.name, kind: t('Web server') });
-      for (const d of ctx.dbm.list()) out.push({ id: `dbs:${d.id}`, name: d.name, kind: t('Database') });
-      for (const a of (ctx.apps ? ctx.apps.list() : [])) out.push({ id: `apps:${a.id}`, name: a.name, kind: 'App' });
-    } catch { /* partly available */ }
+    // Jede Art für sich: Minecraft und Spiele-Server sind eigene Erweiterungen (ctx.minecraft/ctx.games fehlen ohne sie) –
+    // eine fehlende Art darf die anderen (Webserver, Datenbanken, Apps) nicht mitreißen
+    const add = (mgr, prefix, kind) => { try { for (const x of (mgr && typeof mgr.list === 'function' ? mgr.list() : []) || []) out.push({ id: `${prefix}:${x.id}`, name: x.name || x.id, kind }); } catch { /* Art gerade nicht verfügbar */ } };
+    add(ctx.minecraft, 'mc', 'Minecraft');
+    add(ctx.games, 'game', t('Game server'));
+    add(ctx.web, 'web', t('Web server'));
+    add(ctx.dbm, 'dbs', t('Database'));
+    add(ctx.apps, 'apps', 'App');
     return out;
   }
   routes(r) {
     const { t } = this;
-    r.get('/users', (req, res) => res.json({ users: this.list.map((u) => this.pub(u)), areas: Object.fromEntries(Object.entries(AREAS).map(([k, v]) => [k, t(v)])), kindAreas: KIND_AREAS, services: this.services(), remoteEnabled: !!this.ctx.remote.cfg.enabled, mainUser: this.ctx.remote.cfg.user || 'admin' }));
+    r.get('/users', (req, res) => { const idx = this.serviceIndex(); res.json({ users: this.list.map((u) => ({ ...this.pub(u), missing: (u.services || []).filter((s) => idx.missing(s)) })), areas: Object.fromEntries(Object.entries(AREAS).map(([k, v]) => [k, t(v)])), kindAreas: KIND_AREAS, services: this.services(), remoteEnabled: !!this.ctx.remote.cfg.enabled, mainUser: this.ctx.remote.cfg.user || 'admin' }); });
+    r.post('/users/:id/unlock', (req, res) => res.json(this.unlock(req.params.id)));
     r.post('/users', (req, res) => res.json(this.save(req.body || {})));
     r.put('/users/:id', (req, res) => res.json(this.save(req.body || {}, req.params.id)));
     r.delete('/users/:id', (req, res) => { this.remove(req.params.id); res.json({ ok: true }); });
@@ -366,4 +458,4 @@ async function readForm(req) {
   return Object.fromEntries(new URLSearchParams(raw));
 }
 
-module.exports = { Members, readForm, expired, serviceKey, DISCORD_ID, INVITE_HOURS, AREAS, KIND_AREAS, areasFor, MEMBER_ROUTES, ADMIN_ONLY, ALWAYS, compile, classify, memberAllows, hashPw, checkPw, ROLE_MEMBER };
+module.exports = { Members, readForm, expired, serviceKey, DISCORD_ID, INVITE_HOURS, AREAS, KIND_AREAS, areasFor, MEMBER_ROUTES, ADMIN_ONLY, ALWAYS, compile, classify, memberAllows, memberAnswer, hashPw, checkPw, ROLE_MEMBER };

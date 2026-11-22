@@ -13,11 +13,13 @@ function host(extra = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hw-team-f-'));
   return {
     S, dir,
-    ctx: { paths: { data: dir }, settings: { get: () => S, save: () => {} }, remote: { cfg: { user: 'admin', enabled: true }, sessions: new Map(), session: () => null, status: () => ({ enabled: true, domain: 'home.example.com', port: 443, urls: [] }) }, minecraft: { list: () => [] }, web: { list: () => [] }, dbm: { list: () => [] }, ...extra },
+    ctx: { paths: { data: dir }, settings: { get: () => S, save: () => {} }, remote: { cfg: { user: 'admin', enabled: true }, sessions: new Map(), session: () => null, status: () => ({ enabled: true, domain: 'home.example.com', port: 443, urls: [] }) }, minecraft: { list: () => [{ id: 's', name: 'S' }, { id: 'test', name: 'Test' }] }, web: { list: () => [{ id: 'apache', name: 'Apache' }] }, dbm: { list: () => [] }, ...extra },
     t: (s, v) => (v ? String(s).replace(/\{(\w+)\}/g, (m, k) => (v[k] !== undefined ? v[k] : m)) : s),
     error: (st, m) => Object.assign(new Error(m), { status: st }),
   };
 }
+
+function setupMissing() { const h = host(); return { h, users: new Members(h) }; }
 
 test('rights with an end date: no sign-in and no requests afterwards', () => {
   const users = new Members(host());
@@ -70,6 +72,17 @@ test('activity: changes by members from the change log plus refused attempts (ke
   assert.strictEqual(new Members(h).denied.length, 1, 'refused attempts survive a restart');
 });
 
+test('refused attempts: background requests of the interface in turn are noted once each; icons of shared services', () => {
+  const users = new Members(host({}));
+  const u = users.save({ name: 'Max', password: 'max-password', services: ['mc:s'], areas: ['start-stop'] });
+  const ask = (method, path) => users.allowed({ method, path }, { userId: u.id });
+  for (let i = 0; i < 5; i++) for (const p of ['/extmarket', '/live/security']) ask('GET', p);
+  assert.strictEqual(users.denied.length, 2, 'not only compared with the last entry');
+  assert.strictEqual(ask('GET', '/icons/mc/s'), true, 'picture of a shared service');
+  assert.strictEqual(ask('GET', '/icons/mc/other'), false);
+  assert.strictEqual(ask('PUT', '/icons/mc/s'), false, 'changing the picture stays with the owner');
+});
+
 test('invitation form: JSON body or a plain form', async () => {
   assert.deepStrictEqual(await readForm({ body: { password: 'a' } }), { password: 'a' });
   const req = Readable.from([Buffer.from('password=abc%20def&repeat=x')]);
@@ -113,4 +126,25 @@ test('invitation QR code: SVG data address with Hostwerk\'s library, null withou
   assert.strictEqual(await users.qr('/api/team/invite/x'), null, 'only full addresses');
   h.lib = () => { throw new Error('lib: qrcode is not bundled'); };
   assert.strictEqual(await users.qr('https://a.b/c'), null);
+});
+
+test('deleted services in shares: marked as missing, removed on save – unless their kind is not there right now', () => {
+  const { h, users } = setupMissing();
+  const u = users.save({ name: 'Mia', services: ['mc:s', 'web:apache'], areas: ['start-stop'] });
+  h.S.users[0].services.push('mc:gone', 'game:valheim'); // gelöscht bzw. Spiele-Server-Erweiterung gerade aus
+  const idx = users.serviceIndex();
+  assert.deepStrictEqual(h.S.users[0].services.filter((x) => idx.missing(x)), ['mc:gone']);
+  const saved = users.save({ name: 'Mia', services: h.S.users[0].services, areas: ['start-stop'] }, u.id);
+  assert.deepStrictEqual(saved.services, ['mc:s', 'web:apache', 'game:valheim']);
+});
+
+test('account lock of remote access shows on the member and can be lifted', () => {
+  const { h, users } = setupMissing();
+  const u = users.save({ name: 'Mia', services: [], areas: [] });
+  assert.strictEqual(users.pub(h.S.users[0]).locked, null);
+  h.ctx.remote.accountBans = { mia: { until: Date.now() + 900000, level: 1, at: Date.now() } };
+  h.ctx.remote.accountKey = (n) => String(n).trim().toLowerCase();
+  assert.strictEqual(users.pub(h.S.users[0]).locked.level, 1);
+  assert.strictEqual(users.unlock(u.id).locked, null);
+  assert.deepStrictEqual(h.ctx.remote.accountBans, {});
 });

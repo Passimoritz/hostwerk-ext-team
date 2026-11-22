@@ -45,8 +45,8 @@ test('members: create, sign in, rights, filtered overview, admin', () => {
   assert.strictEqual(can('/overview', 'GET'), true);
   assert.strictEqual(can('/mc/servers', 'GET'), true);
   assert.strictEqual(can('/logs/mc:survival', 'GET'), false, 'logs not shared');
-  const o = users.filterOverview({ web: [{ id: 'a' }], db: [], minecraft: [{ id: 'survival' }, { id: 'other' }], apps: [], mail: {} }, sess);
-  assert.strictEqual(o.minecraft.length, 1); assert.strictEqual(o.web.length, 0); assert.strictEqual(o.member.name, 'Max'); assert.strictEqual(o.mail, null);
+  const o = users.filterOverview({ web: [{ id: 'a' }], db: [], minecraft: [{ id: 'survival' }, { id: 'other' }], apps: [], mail: { installed: true, config: { smtpPort: 2525, relay: { pass: 'x' } }, count: 7, unread: 3, proc: { state: 'running' } } }, sess);
+  assert.strictEqual(o.minecraft.length, 1); assert.strictEqual(o.web.length, 0); assert.strictEqual(o.member.name, 'Max'); assert.deepStrictEqual(o.mail, { installed: true, config: { smtpPort: 2525 }, count: 0, unread: 0, trash: 0, proc: { state: 'running' } }, 'mail catcher: shape for the overview, no mails or relay');
   const adm = users.save({ name: 'Boss', password: 'boss-password', role: 'admin' });
   assert.strictEqual(users.allowed({ path: '/settings/general', method: 'PUT' }, { userId: adm.id }), true);
   assert.strictEqual(users.allowed({ path: '/anything', method: 'DELETE' }, null), true, 'local app / main account');
@@ -120,4 +120,75 @@ test('users.can and Discord ID: same rules as remote access, for the Discord bot
   // Discord-ID entfernen
   users.get(m.id).until = null;
   assert.ok(!('discordId' in users.save({ name: 'Lena', discordId: '' }, m.id)));
+});
+
+test('members: no umlauts (remote sign-in cannot), short password creates nothing, no rename onto the main account', () => {
+  const users = new Members(host('en'));
+  assert.throws(() => users.save({ name: 'Jürgen', password: 'juergen-pass' }), /without umlauts/, 'Hostwerk’s remote sign-in fails for names with ä, é …');
+  assert.throws(() => users.save({ name: 'M'.repeat(41), password: 'juergen-pass' }), /2–40/, 'too long is refused, not cut silently');
+  const j = users.save({ name: 'Juergen Zoe', password: 'juergen-pass' });
+  assert.ok(users.login('juergen zoe', 'juergen-pass'));
+  assert.throws(() => users.save({ name: 'Anna', password: 'short' }), /8 characters/);
+  assert.strictEqual(users.list.length, 1, 'a refused password leaves no half-created member behind');
+  assert.throws(() => users.save({ name: 'Admin', password: 'x'.repeat(10) }, j.id), /main remote access account/, 'no rename onto the main account');
+  assert.throws(() => users.save({ name: 'a<b>', password: 'x'.repeat(10) }), /2–40/);
+});
+
+test('members: always-allowed lists and settings come back shortened (no other services, no password hashes)', () => {
+  const h = host('en');
+  h.S.users = [];
+  h.S.live = { remote: { passHash: 'scrypt:x:y', totp: 'secret' } };
+  h.S.general = { language: 'en', theme: 'dark', ui: { prefs: { a: '1' } }, notifications: { discord: 'https://discord.example/hook' } };
+  h.S.ai = { disabled: true, providers: [{ key: 'sk-test' }] };
+  const users = new Members(h);
+  const u = users.save({ name: 'Mia', password: 'mia-password', services: ['mc:survival', 'game:g1'], areas: ['start-stop'] });
+  const sess = { userId: u.id };
+  const ask = (p, body) => {
+    let sent; const res = { statusCode: 200, json: (b) => { sent = b; return res; } };
+    assert.strictEqual(users.allowed({ path: p, method: 'GET', res }, sess), true, p);
+    res.json(body); return sent;
+  };
+  assert.deepStrictEqual(ask('/mc/servers', [{ id: 'survival' }, { id: 'secret' }]).map((x) => x.id), ['survival']);
+  const g = ask('/games', { linux: false, servers: [{ id: 'g1' }, { id: 'g2' }] });
+  assert.deepStrictEqual(g.servers.map((x) => x.id), ['g1']); assert.strictEqual(g.linux, false);
+  assert.deepStrictEqual(ask('/web', [{ id: 'shop' }]), []);
+  const s = ask('/settings', h.S);
+  assert.deepStrictEqual(s, { general: { language: 'en', theme: 'dark', ui: { prefs: { a: '1' } } }, ai: { disabled: true } });
+  assert.ok(!/passHash|sk-test|discord|scrypt/.test(JSON.stringify(s)), 'no hashes, keys or notification targets');
+  const sum = ask('/summary', { version: '3', services: { running: 1, total: 4, errors: ['Secret server'] }, problems: ['Secret server: crashed'] });
+  assert.deepStrictEqual(sum.services.errors, []); assert.deepStrictEqual(sum.problems, []);
+  // the owner and admins get everything unchanged; error answers stay as they are
+  let raw; const res = { statusCode: 200, json: (b) => { raw = b; } };
+  users.allowed({ path: '/settings', method: 'GET', res }, null); res.json(h.S); assert.strictEqual(raw, h.S);
+});
+
+test('team setups: a refused address keeps the connection, broken files give a clear message', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hw-team-c-'));
+  const h = host('en');
+  const team = new TeamSetups(h, { timers: false });
+  await team.configure({ source: 'folder', location: dir });
+  await assert.rejects(team.configure({ source: 'url', location: 'http://insecure' }), /https/);
+  await assert.rejects(team.configure({ source: 'folder', location: path.join(dir, 'missing') }), /Folder not found/);
+  assert.strictEqual(team.state().source, 'folder'); assert.strictEqual(team.state().location, dir);
+  fs.writeFileSync(path.join(dir, 'hostwerk-team.json'), '{ broken');
+  assert.match((await team.check()).error, /not a Hostwerk setup/);
+  const off = await team.configure({ source: null });
+  assert.strictEqual(off.source, null); assert.strictEqual(off.error, null, 'disconnecting clears the old message');
+});
+
+test('members: overview kinds are filtered, legacy lists of other kinds left out; services without the Minecraft extension', () => {
+  const h = host('en');
+  delete h.ctx.minecraft; // Minecraft is its own extension – not installed here
+  h.ctx.web = { list: () => [{ id: 'shop', name: 'Shop' }] };
+  const users = new Members(h);
+  assert.deepStrictEqual(users.services().map((s) => s.id), ['web:shop'], 'web servers still listed without ctx.minecraft');
+  const u = users.save({ name: 'Mia', password: 'mia-password', services: ['mc:a', 'game:g1'], areas: ['start-stop'] });
+  const o = users.filterOverview({ web: [{ id: 'shop' }], db: [], apps: [], vms: [{ id: 'secret-vm' }], app: { version: '3' },
+    kinds: { mc: { label: 'Minecraft', items: [{ id: 'a' }, { id: 'b' }] }, game: { items: [{ id: 'g1' }, { id: 'g2' }] }, vm: { label: 'VMs', items: [{ id: 'secret-vm' }] } } }, { userId: u.id });
+  assert.deepStrictEqual(o.kinds.mc.items.map((x) => x.id), ['a']);
+  assert.deepStrictEqual(o.kinds.game.items.map((x) => x.id), ['g1']);
+  assert.deepStrictEqual(o.kinds.vm.items, [], 'kinds without a sharing rule stay empty');
+  assert.strictEqual(o.kinds.mc.label, 'Minecraft', 'kind metadata stays for the interface');
+  assert.strictEqual(o.vms, undefined, 'unknown legacy lists are left out');
+  assert.strictEqual(o.web.length, 0); assert.strictEqual(o.app.version, '3');
 });
